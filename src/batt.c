@@ -64,22 +64,26 @@ LOG_MODULE_DECLARE(app_battery, LOG_LEVEL_DBG);
 // This was disabled per discussion in Slack on April 25, 2021.
 #define ENABLE_CHARGING_CONTROL 0
 
-#if (CONFIG_LOG_DEFAULT_LEVEL >= LOG_LEVEL_INF)
+#if CONFIG_LOG_DEFAULT_LEVEL >= LOG_LEVEL_INF
 #define DEBUG_PRINT 1
+#else
+#define DEBUG_PRINT 0
 #endif
 
 // Simplify conditionals below -- DEBUG_PRINT is required for ENABLE_NV_MEMORY_UPDATE_CODE to do anything
-#if defined(DEBUG_PRINT) && ENABLE_NV_MEMORY_UPDATE_CODE
+#if DEBUG_PRINT && ENABLE_NV_MEMORY_UPDATE_CODE
 #define ENABLE_NV_WRITE_PROMPT 1
 #else
 #define ENABLE_NV_WRITE_PROMPT 0
 #endif
 
-// Uncomment to only store within 3 seconds on 'y',
-// or erase hist store flash on 'e'
-#if defined(DEBUG_PRINT)
-#define HIST_STORE_PROMPT 1
-#endif
+// Uncomment to only store within 3 seconds on 'y', or erase hist store flash on 'e'
+
+//if DEBUG_PRINT
+//#define HIST_STORE_PROMPT 1
+//#else
+#define HIST_STORE_PROMPT 0
+//#endif
 
 // Voltage below which we should stop everything until charging starts
 #define SHUTDOWN_MV 2850
@@ -296,13 +300,14 @@ static runtime_battery_data_t *last_empty_history_entry; // pointer to first emp
 
 static uint16_t reset_cycle_count;
 
-static void print_runtime_entry(runtime_battery_data_t *data, unsigned int start, unsigned int count)
+static void print_runtime_entry(runtime_battery_data_t *data, unsigned int start, unsigned int count, const char *prefix)
 {
-#ifndef DEBUG_PRINT
+#if DEBUG_PRINT
     (void)data;
 #endif
-    LOG_DBG("rst_cycle=%d, minute=%d, unused=%d, estimated=%d, crc=0x%08X",
-              data->rst_cycle, data->minute, data->unused, data->estimated, data->crc);
+    LOG_DBG("%srst_cycle=%d, minute=%d, unused=%d, estimated=%d, crc=0x%08X",
+            prefix ? prefix : "",
+            data->rst_cycle, data->minute, data->unused, data->estimated, data->crc);
     for (unsigned int j = start; j < start + count; j++) {
         LOG_DBG("   pack %u: mixcap:0x%04X, repcap:0x%04X", j + 1, data->packs[j].mixcap, data->packs[j].repcap);
     }
@@ -312,14 +317,15 @@ static void print_runtime_entry(runtime_battery_data_t *data, unsigned int start
 static void print_batt_hist(void)
 {
     runtime_battery_data_t *data = battery_history;
+    char prefix[10];
 
     LOG_DBG("Runtime battery history:\r\nentry size=%lu, entry count=%u",
               sizeof(runtime_battery_data_t), NUM_BATT_HIST_ENTRIES);
 
     for (unsigned int i = 0; i < NUM_BATT_HIST_ENTRIES; i++) {
         if (!flashIsErasedF091((flashaddr_t)data, sizeof(runtime_battery_data_t))) {
-            LOG_DBG("%u. ", i);
-            print_runtime_entry(data, 0, NPACKS);
+            snprintk(prefix, sizeof(prefix), "%d. ", i);
+            print_runtime_entry(data, 0, NPACKS, prefix);
         } else {
             LOG_DBG("%u. Found erased entry. Done.", i);
             break;
@@ -355,7 +361,7 @@ static void find_last_batt_hist(void)
     // we found a good entry, so save a copy in RAM
     if (last_valid_history_entry != NULL) {
         LOG_DBG("Selected last valid runtime entry:");
-        print_runtime_entry(last_valid_history_entry, 0, NPACKS);
+        print_runtime_entry(last_valid_history_entry, 0, NPACKS, NULL);
 
         reset_cycle_count = last_valid_history_entry->rst_cycle;
 
@@ -375,7 +381,7 @@ static void load_latest_batt_hist(pack_t *pack)
     uint16_t tmp;
 
     LOG_DBG("Loading entry to pack %u:", pack->pack_number);
-    print_runtime_entry(last_valid_history_entry, pack->pack_number - 1, 1);
+    print_runtime_entry(last_valid_history_entry, pack->pack_number - 1, 1, NULL);
     tmp = MIN(last_valid_history_entry->packs[pack->pack_number - 1].mixcap, CELL_CAPACITY_MAH_RAW);
     r = max17205Write(&pack->drvr, MAX17205_AD_MIXCAP, tmp);
     if (r != MSG_OK) {
@@ -411,7 +417,7 @@ static bool store_current_batt_hist(void)
     msg_t r;
     uint16_t tmp;
 
-#if defined(HIST_STORE_PROMPT)
+#if HIST_STORE_PROMPT
     uint8_t ch = 0;
 
     LOG_DBG("********** Store batt_hist e(rase), y(es), n(o)? ");
@@ -449,7 +455,7 @@ static bool store_current_batt_hist(void)
     new_data.estimated = false;
     new_data.crc = crc32((uint8_t *)&new_data, sizeof(new_data) - sizeof(new_data.crc), 0);
     LOG_DBG("Storing new runtime battery entry:");
-    print_runtime_entry(&new_data, 0, NPACKS);
+    print_runtime_entry(&new_data, 0, NPACKS, NULL);
     for (i = 0; i < MAX_HIST_STORE_RETRIES; i++) {
         if (add_next_batt_hist(&new_data)) {
             LOG_DBG("Done.");
@@ -727,7 +733,7 @@ static bool populate_pack_data(MAX17205Driver *driver, batt_pack_data_t *dest) {
  * Returns true if NV RAM was written, false otherwise.
  */
 static bool nv_ram_write(MAX17205Driver *devp, const char *pack_str) {
-#ifndef DEBUG_PRINT
+#if DEBUG_PRINT
     (void)pack_str;
 #endif
     LOG_DBG("\r\nEnsure NV RAM settings are correct for %s", pack_str);
@@ -814,7 +820,7 @@ static bool prompt_nv_write(MAX17205Driver *devp, const char *pack_str) {
 
 //If state of charge is known to be full, set LS bits D6-D0 of LearnCfg register to 0b111
 //and write MixCap and RepCap registers to 2600.
-#if ENABLE_LEARN_COMPLETE && defined(DEBUG_PRINT)
+#if ENABLE_LEARN_COMPLETE && DEBUG_PRINT
 static bool update_learning_complete(MAX17205Driver *devp, pack_t *pack) {
     batt_pack_data_t *pack_data = &pack->data;
     bool ret = false;
@@ -978,7 +984,7 @@ static bool check_for_critically_low_batteries(void)
 
 static void manage_calibration(void)
 {
-#if defined(DEBUG_PRINT)
+#if DEBUG_PRINT
     unsigned int i;
 #if ENABLE_NV_WRITE_PROMPT
     bool nv_written = false;
@@ -1082,7 +1088,7 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
             store_current_batt_hist();
         }
 
-#if defined(DEBUG_PRINT)
+#if DEBUG_PRINT
         LOG_DBG("================================= loop %u, %u.%03u s", loop, ms / 1000, ms % 1000);
 #endif
 
