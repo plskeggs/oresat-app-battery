@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/console/console.h>
 #include <canopennode.h>
 #include <OD.h>
 #include <oresat.h>
@@ -418,10 +419,10 @@ static bool store_current_batt_hist(void)
     uint16_t tmp;
 
 #if HIST_STORE_PROMPT
-    uint8_t ch = 0;
 
     LOG_DBG("********** Store batt_hist e(rase), y(es), n(o)? ");
-    sdReadTimeout(DEBUG_SD, &ch, 1, TIME_S2I(3)); // wait for input but timeout
+    uint8_t ch = console_getchar(); // TODO: Zephyr console does not have a read timeout; switch to shell
+
     LOG_DBG("");
     if (ch == 'e') {
         LOG_DBG("Erasing *************");
@@ -793,8 +794,8 @@ static bool prompt_nv_write(MAX17205Driver *devp, const char *pack_str) {
     if (num_writes_left > 0) {
         // Answer n to just use the changes in the volatile registers
         LOG_DBG("Write NV memory on MAX17205 for %s ? y/n? ", pack_str);
-        uint8_t ch = 0;
-        sdReadTimeout(DEBUG_SD, &ch, 1, TIME_S2I(NV_WRITE_PROMPT_TIMEOUT_S)); // wait for input but timeout
+        uint8_t ch = console_getchar(); // TODO: Zephyr console does not have a read timeout; switch to shell
+
         LOG_DBG("");
 
         if (ch == 'y') {
@@ -1036,6 +1037,8 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
         k_sleep(sys_timepoint_timeout(timepoint));
     }
 #endif
+
+    console_init();
 
 #if VERBOSE_DEBUG
     print_batt_hist();
