@@ -997,12 +997,43 @@ enum {
 
 /* MAX17205 specific channels */
 enum max17205_channel {
-	MAX17205_COULOMB_COUNTER,
+	MAX17205_CHAN_TEMP_1 = SENSOR_CHAN_PRIV_START,
+	MAX17205_CHAN_TEMP_2,
+	// SENSOR_CHAN_GAUGE_TEMP,
+	MAX17205_CHAN_AVG_TEMP_1,
+	MAX17205_CHAN_AVG_TEMP_2,
+	MAX17205_CHAN_AVG_INT_TEMP,
+	MAX17205_CHAN_TEMP_MAX,
+	MAX17205_CHAN_TEMP_MIN,
+	MAX17205_CHAN_V_CELL_1,
+	MAX17205_CHAN_V_CELL_2,
+	MAX17205_CHAN_V_CELL_AVG,
+	MAX17205_CHAN_V_CELL,
+	// SENSOR_CHAN_GAUGE_VOLTAGE
+	MAX17205_CHAN_V_CELL_MAX,
+	MAX17205_CHAN_V_CELL_MIN,
+	// SENSOR_CHAN_CURRENT
+	// SENSOR_CHAN_GAUGE_AVG_CURRENT
+	MAX17205_CHAN_CURRENT_MAX,
+	MAX17205_CHAN_CURRENT_MIN,
+	// SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY
+	// SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY
+	MAX17205_CHAN_MIX_CAPACITY,
+	// SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY
+	// SENSOR_CHAN_GAUGE_TIME_TO_EMPTY
+	// SENSOR_CHAN_GAUGE_TIME_TO_FULL
+	MAX17205_CHAN_AVAILABLE_SOC,
+	MAX17205_CHAN_PRESENT_SOC,
+	MAX17205_CHAN_REPORTED_SOC,
+	// SENSOR_CHAN_GAUGE_CYCLE_COUNT
 };
 
 enum max17205_attribute {
     MAX17205_ATTR_START = SENSOR_ATTR_PRIV_START,
     // place misc. attributes here
+
+	MAX17205_ADDR_HW_RESET,
+	MAX17205_ADDR_FW_RESET,
 
     MAX17205_ATTR_REGS = MAX17205_ATTR_START + 0x100,
     // add MAX17205_ATTR_REGS with register address to get attribute to read/write
@@ -1011,30 +1042,36 @@ enum max17205_attribute {
 
 
 struct max17205_data {
-	/* Current cell voltage in units of 1.25/16mV */
-	uint16_t voltage;
-	/* Average current in units of 156.25uA */
-	int16_t avg_current;
-	/* Desired charging current in mA */
-	uint16_t ichg_term;
-	/* Remaining capacity as a %age */
-	uint16_t state_of_charge;
-	/* Internal temperature in units of 1/256 degrees C */
-	int16_t internal_temp;
-	/* Full charge capacity in mAh */
-	uint16_t full_cap;
-	/* Remaining capacity in mAh */
-	uint16_t remaining_cap;
-	/* Time to empty in seconds */
-	uint16_t time_to_empty;
-	/* Time to full in seconds */
-	uint16_t time_to_full;
-	/* Cycle count in 1/100ths (number of charge/discharge cycles) */
-	uint16_t cycle_count;
-	/* Battery capacity in mAh */
-	uint16_t design_cap;
-	/* Spent capacity in mAh */
-	uint16_t coulomb_counter;
+	/* Raw register values */
+	int16_t temp_1;         // MAX17205_CHAN_TEMP_1
+	int16_t temp_2;         // MAX17205_CHAN_TEMP_2,
+	int16_t int_temp;       // SENSOR_CHAN_GAUGE_TEMP,
+	int16_t avg_temp_1;     // MAX17205_CHAN_AVG_TEMP_1,
+	int16_t avg_temp_2;     // MAX17205_CHAN_AVG_TEMP_2,
+	int16_t avg_int_temp;   // MAX17205_CHAN_AVG_INT_TEMP,
+	int16_t temp_max;       // MAX17205_CHAN_TEMP_MAX,
+	int16_t temp_min;       // MAX17205_CHAN_TEMP_MIN,
+	uint16_t v_cell_1;      // MAX17205_CHAN_V_CELL_1,
+	uint16_t v_cell_2;      // MAX17205_CHAN_V_CELL_2,
+	uint16_t v_cell_avg;    // MAX17205_CHAN_V_CELL_AVG,
+	uint16_t v_cell;        // MAX17205_CHAN_V_CELL,
+	uint16_t v_batt;        // SENSOR_CHAN_GAUGE_VOLTAGE,
+	uint16_t v_cell_max;    // MAX17205_CHAN_V_CELL_MAX,
+	uint16_t v_cell_min;    // MAX17205_CHAN_V_CELL_MIN,
+	int16_t current;        // SENSOR_CHAN_CURRENT,
+	int16_t avg_current;    // SENSOR_CHAN_GAUGE_AVG_CURRENT,
+	int16_t current_max;    // MAX17205_CHAN_CURRENT_MAX,
+	int16_t current_min;    // MAX17205_CHAN_CURRENT_MIN,
+	uint16_t full_cap;      // SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY,
+	uint16_t available_cap; // SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY,
+	uint16_t mix_cap;       // MAX17205_CHAN_MIX_CAPACITY,
+	uint16_t reported_cap;  // SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY,
+	uint16_t time_to_empty; // SENSOR_CHAN_GAUGE_TIME_TO_EMPTY,
+	uint16_t time_to_full;  // SENSOR_CHAN_GAUGE_TIME_TO_FULL,
+	uint16_t available_soc; // MAX17205_CHAN_AVAILABLE_SOC,
+	uint16_t present_soc;   // MAX17205_CHAN_PRESENT_SOC,
+	uint16_t reported_soc;  // MAX17205_CHAN_REPORTED_SOC,
+	uint16_t cycle_count;   // SENSOR_CHAN_GAUGE_CYCLE_COUNT,
 };
 
 struct max17205_config {
@@ -1056,5 +1093,12 @@ struct max17205_config {
 	/* Defined charge voltage value in mV */
 	uint16_t charge_voltage;
 };
+/**
+ * @brief   Structure to store register:value pairs for configuration
+ */
+typedef struct {
+    uint16_t reg;
+    uint16_t value;
+} max17205_regval_t;
 
 #endif

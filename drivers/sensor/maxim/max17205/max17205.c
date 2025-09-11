@@ -104,13 +104,21 @@ static int max17205_channel_get(const struct device *dev, enum sensor_channel ch
         valp->val2 = current % 1000000;
         break;
     }
-    case SENSOR_CHAN_GAUGE_STATE_OF_CHARGE:
-        valp->val1 = data->state_of_charge / 256;
-        valp->val2 = data->state_of_charge % 256 * 1000000 / 256;
+
+    /** Standby current, in amps (negative=discharging) **/
+    case SENSOR_CHAN_GAUGE_STDBY_CURRENT:
         break;
+    /** Max load current, in amps (negative=discharging) **/
+    case SENSOR_CHAN_GAUGE_MAX_LOAD_CURRENT:
+        break;
+
     case SENSOR_CHAN_GAUGE_TEMP:
         valp->val1 = data->internal_temp / 256;
         valp->val2 = data->internal_temp % 256 * 1000000 / 256;
+        break;
+    case SENSOR_CHAN_GAUGE_STATE_OF_CHARGE:
+        valp->val1 = data->state_of_charge / 256;
+        valp->val2 = data->state_of_charge % 256 * 1000000 / 256;
         break;
     case SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY:
         convert_millis(valp, data->full_cap);
@@ -118,6 +126,20 @@ static int max17205_channel_get(const struct device *dev, enum sensor_channel ch
     case SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY:
         convert_millis(valp, data->remaining_cap);
         break;
+    case SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY:
+        convert_millis(valp, data->design_cap);
+        break;
+
+	/** Full Available Capacity in mAh **/
+    case SENSOR_CHAN_GAUGE_FULL_AVAIL_CAPACITY:
+        break;
+    /** Average power in mW **/
+    case SENSOR_CHAN_GAUGE_AVG_POWER:
+        break;
+    /** State of health measurement in % **/
+    case SENSOR_CHAN_GAUGE_STATE_OF_HEALTH:
+        break;
+
     case SENSOR_CHAN_GAUGE_TIME_TO_EMPTY:
         /* Get time in ms */
         if (data->time_to_empty == 0xffff) {
@@ -141,9 +163,6 @@ static int max17205_channel_get(const struct device *dev, enum sensor_channel ch
     case SENSOR_CHAN_GAUGE_CYCLE_COUNT:
         valp->val1 = data->cycle_count / 100;
         valp->val2 = data->cycle_count % 100 * 10000;
-        break;
-    case SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY:
-        convert_millis(valp, data->design_cap);
         break;
     case SENSOR_CHAN_GAUGE_DESIGN_VOLTAGE:
         convert_millis(valp, config->design_voltage);
@@ -178,36 +197,134 @@ static int max17205_channel_get(const struct device *dev, enum sensor_channel ch
 static int max17205_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
     struct max17205_data *data = dev->data;
+    int rc;
+    int reg_addr;
+    int16_t *dest;
 
-    /* clang-format off */
-    struct {
-        int reg_addr;
-        int16_t *dest;
-    } regs[] = {
-        { VCELL, &data->voltage },
-        { AVG_CURRENT, &data->avg_current },
-        { ICHG_TERM, &data->ichg_term },
-        { REP_SOC, &data->state_of_charge },
-        { INT_TEMP, &data->internal_temp },
-        { REP_CAP, &data->remaining_cap },
-        { FULL_CAP_REP, &data->full_cap },
-        { TTE, &data->time_to_empty },
-        { TTF, &data->time_to_full },
-        { CYCLES, &data->cycle_count },
-        { DESIGN_CAP, &data->design_cap },
-        { COULOMB_COUNTER, &data->coulomb_counter },
-    };
-    /* clang-format on */
-
-    __ASSERT_NO_MSG(chan == SENSOR_CHAN_ALL);
-    for (size_t i = 0; i < ARRAY_SIZE(regs); i++) {
-        int rc;
-
-        rc = max17205_reg_read(dev, regs[i].reg_addr, regs[i].dest);
-        if (rc != 0) {
-            LOG_ERR("Failed to read channel %d", chan);
-            return rc;
-        }
+    switch (chan) {
+    case MAX17205_CHAN_TEMP_1:
+        reg_addr = MAX17205_AD_TEMP1;
+        dest = &data->temp_1;
+        break;
+    case MAX17205_CHAN_TEMP_2:
+        reg_addr = MAX17205_AD_TEMP2;
+        dest = &data->temp_2;
+        break;
+    case SENSOR_CHAN_GAUGE_TEMP:
+        reg_addr = MAX17205_AD_INTTEMP;
+        dest = &data->int_temp;
+        break;
+    case MAX17205_CHAN_AVG_TEMP_1:
+        reg_addr = MAX17205_AD_AVGTEMP1;
+        dest = &data->avg_temp_1;
+        break;
+    case MAX17205_CHAN_AVG_TEMP_2:
+        reg_addr = MAX17205_AD_AVGTEMP2;
+        dest = &data->avg_temp_2;
+        break;
+    case MAX17205_CHAN_AVG_INT_TEMP:
+        reg_addr = MAX17205_AD_AVGINTTEMP;
+        dest = &data->avg_int_temp;
+        break;
+    case MAX17205_CHAN_TEMP_MAX:
+        reg_addr = MAX17205_AD_MAXMINTEMP;
+        dest = &data->temp_max_C;
+        break;
+    case MAX17205_CHAN_TEMP_MIN:
+        reg_addr = MAX17205_AD_MAXMINTEMP;
+        dest = &data->temp_min_C;
+        break;
+    case MAX17205_CHAN_V_CELL_1:
+        reg_addr = MAX17205_AD_CELL1;
+        break;
+    case MAX17205_CHAN_V_CELL_2:
+        reg_addr = MAX17205_AD_BATT; // post processing uses batt and cell1 to compute cell2
+        dest = &data->v_cell_2;
+        break;
+    case MAX17205_CHAN_V_CELL_AVG:
+        reg_addr = MAX17205_AD_AVGVCELL;
+        dest = &data->v_cell_avg;
+        break;
+    case MAX17205_CHAN_V_CELL:
+        reg_addr = MAX17205_AD_VCELL;
+        dest = &data->v_cell;
+        break;
+    case SENSOR_CHAN_GAUGE_VOLTAGE:
+        reg_addr = MAX17205_AD_BATT; // post processing uses batt and cell1 to compute cell2
+        dest = &data->v_batt;
+        break;
+    case MAX17205_CHAN_V_CELL_MAX:
+        reg_addr = MAX17205_AD_MAXMINVOLT;
+        dest = &data->v_cell_max;
+        break;
+    case MAX17205_CHAN_V_CELL_MIN:
+        reg_addr = MAX17205_AD_MAXMINVOLT;
+        dest = &data->v_cell_min;
+        break;
+    case SENSOR_CHAN_CURRENT:
+        reg_addr = MAX17205_AD_CURRENT;
+        dest = &data->current;
+        break;
+    case SENSOR_CHAN_GAUGE_AVG_CURRENT:
+        reg_addr = MAX17205_AD_AVGCURRENT;
+        dest = &data->avg_current;
+        break;
+    case MAX17205_CHAN_CURRENT_MAX:
+        reg_addr = MAX17205_AD_MAXMINCURR;
+        data = &data->current_max;
+        break;
+    case MAX17205_CHAN_CURRENT_MIN:
+        reg_addr = MAX17205_AD_MAXMINCURR;
+        data = &data->current_min;
+        break;
+    case SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY:
+        reg_addr = MAX17205_AD_FULLCAPREP;
+        data = &data->full_cap;
+        break;
+    case SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY:
+        reg_addr = MAX17205_AD_AVCAP;
+        data = &data->available_cap;
+        break;
+    case MAX17205_CHAN_MIX_CAPACITY:
+        reg_addr = MAX17205_AD_MIXCAP;
+        data = &data->mix_cap;
+        break;
+    case SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY:
+        reg_addr = MAX17205_AD_REPCAP;
+        data = &data->reported_cap;
+        break;
+    case SENSOR_CHAN_GAUGE_TIME_TO_EMPTY:
+        reg_addr = MAX17205_AD_TTE;
+        data = &data->time_to_empty;
+        break;
+    case SENSOR_CHAN_GAUGE_TIME_TO_FULL:
+        reg_addr = MAX17205_AD_TTF;
+        data = &data->time_to_full;
+        break;
+    case MAX17205_CHAN_AVAILABLE_SOC:
+        reg_addr = MAX17205_AD_AVSOC;
+        data = &data->available_soc;
+        break;
+    case MAX17205_CHAN_PRESENT_SOC:
+        reg_addr = MAX17205_AD_VFSOC;
+        data = &data->present_soc;
+        break;
+    case MAX17205_CHAN_REPORTED_SOC:
+        reg_addr = MAX17205_AD_REPSOC;
+        data = &data->reported_soc;
+        break;
+    case SENSOR_CHAN_GAUGE_CYCLE_COUNT:
+        reg_addr = MAX17205_AD_CYCLES;
+        data = &data->cycle_count;
+        break;
+    default:
+        LOG_ERR("Unknown channel: %d", chan);
+        return -ENOTSUP;
+    }
+    rc = max17205_reg_read(dev, reg_addr, dest);
+    if (rc != 0) {
+        LOG_ERR("Failed to read channel %d", chan);
+        return rc;
     }
 
     return 0;

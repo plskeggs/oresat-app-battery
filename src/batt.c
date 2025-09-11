@@ -638,7 +638,7 @@ static bool populate_pack_data(MAX17205Driver *driver, batt_pack_data_t *dest) {
     }
 
     /* Record pack and cell voltages to object dictionary */
-    if( (r = max17205ReadVoltage(driver, MAX17205_AD_AVGCELL1, &dest->v_cell_1_mV)) != MSG_OK ) {
+    if( (r = max17205ReadVoltage(driver, MAX17205_AD_CELL1, &dest->v_cell_1_mV)) != MSG_OK ) {
         dest->is_data_valid = false;
     }
 

@@ -103,7 +103,7 @@ msg_t max17205FirmwareReset(MAX17205Driver * devp) {
 
     msg_t msg;
 
-    dbgprintf("Performing MAX17205 firmware reset\r\n");
+    LOG_DBG("Performing MAX17205 firmware reset");
     // Now firmware-reset the chip so it will use the values written to various registers
     msg = max17205Write(devp, MAX17205_AD_CONFIG2, MAX17205_CONFIG2_POR_CMD);
     chThdSleepMilliseconds(MAX17205_T_POR_MS);
@@ -124,13 +124,13 @@ msg_t max17205HardwareReset(MAX17205Driver * devp) {
 
     r = max17205Write(devp, MAX17205_AD_STATUS, 0);
     if (r != MSG_OK) {
-        dbgprintf("Unable to clear POR status bit\r\n");
+        LOG_ERR("Unable to clear POR status bit");
     }
 
-    dbgprintf("Performing MAX17205 hardware reset\r\n");
+    LOG_DBG("Performing MAX17205 hardware reset");
     r = max17205Write(devp, MAX17205_AD_COMMAND, MAX17205_COMMAND_HARDWARE_RESET);
     if (r != MSG_OK) {
-        dbgprintf("Failed to write hardware reset command\r\n");
+        LOG_ERR("Failed to write hardware reset command");
         return r;
     }
 
@@ -142,7 +142,7 @@ msg_t max17205HardwareReset(MAX17205Driver * devp) {
     do {
         r = max17205Read(devp, MAX17205_AD_STATUS, &status);
         if (r != MSG_OK) {
-            dbgprintf("Failed to read status after hardware reset\r\n");
+            LOG_ERR("Failed to read status after hardware reset");
             return r;
         }
         chThdSleepMilliseconds(1);
@@ -150,18 +150,18 @@ msg_t max17205HardwareReset(MAX17205Driver * devp) {
     } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
 
     if (!(status & MAX17205_STATUS_POR)) {
-        dbgprintf("POR bit is not yet set. Timing out.\r\n");
+        LOG_ERR("POR bit is not yet set. Timing out.");
         return MSG_RESET;
     }
 
     r = max17205Write(devp, MAX17205_AD_STATUS, 0);
     if (r != MSG_OK) {
-        dbgprintf("Unable to clear POR status bit\r\n");
+        LOG_ERR("Unable to clear POR status bit");
     }
 
     r = max17205FirmwareReset(devp);
     if (r != MSG_OK) {
-        dbgprintf("Failed to perform firmware reset\r\n");
+        LOG_ERR("Failed to perform firmware reset");
         return r;
     }
 
@@ -171,7 +171,7 @@ msg_t max17205HardwareReset(MAX17205Driver * devp) {
     do {
         r = max17205Read(devp, MAX17205_AD_STATUS, &status);
         if (r != MSG_OK) {
-            dbgprintf("Failed to read status after firmware reset\r\n");
+            LOG_ERR("Failed to read status after firmware reset");
             return r;
         }
         chThdSleepMilliseconds(1);
@@ -179,7 +179,7 @@ msg_t max17205HardwareReset(MAX17205Driver * devp) {
     } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
 
     if (!(status & MAX17205_STATUS_POR)) {
-        dbgprintf("POR bit is not yet set. Timing out.\r\n");
+        LOG_ERR("POR bit is not yet set. Timing out.");
         return MSG_RESET;
     }
 
@@ -208,7 +208,7 @@ bool max17205Start(MAX17205Driver *devp, const MAX17205Config *config) {
 
     chThdSleepMilliseconds(MAX17205_T_POR_MS);
     for (const max17205_regval_t *pair = config->regcfg; pair->reg; pair++) {
-        dbgprintf("Setting MAX17205 register 0x%X to 0x%X\r\n", pair->reg, pair->value);
+        LOG_DBG("Setting MAX17205 register 0x%X to 0x%X", pair->reg, pair->value);
 
         if (max17205Write(devp, pair->reg, pair->value) != MSG_OK) {
             comm_error_count++;
@@ -278,7 +278,7 @@ msg_t max17205ReadCapacity(MAX17205Driver *devp, const uint16_t reg, uint32_t *d
     if (r == MSG_OK) {
         // Reference datasheet table 1: Capacity LSB is 5.0μVh/RSENSE where Vh/R=Ah, unsigned.
         *dest_mAh = ((uint32_t)buf * 5000U) / devp->rsense_uOhm;
-        dbgprintf("  max17205ReadCapacity(0x%X %s) = %u mAh (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadCapacity(0x%X %s) = %u mAh (raw: 0x%X)",
             reg, max17205RegToStr(reg), *dest_mAh, buf);
     }
     return r;
@@ -292,7 +292,7 @@ msg_t max17205WriteCapacity(MAX17205Driver *devp, const uint16_t reg, uint32_t d
     buf = (uint16_t)((dest_mAh * devp->rsense_uOhm) / 5000U);
     const msg_t r = max17205Write(devp, reg, buf);
     if (r == MSG_OK) {
-        dbgprintf("  max17205WriteCapacity(0x%X %s) = %u mAh (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205WriteCapacity(0x%X %s) = %u mAh (raw: 0x%X)",
             reg, max17205RegToStr(reg), dest_mAh, buf);
     }
     return r;
@@ -318,7 +318,7 @@ msg_t max17205ReadPercentage(MAX17205Driver *devp, uint16_t reg, uint8_t *dest_p
     if (r == MSG_OK) {
         // Reference datasheet table 1: Percentage LSB is 1/256%, unsigned.
         *dest_pct = buf / 256U;
-        dbgprintf("  max17205ReadPercentage(0x%X %s) = %u%% (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadPercentage(0x%X %s) = %u%% (raw: 0x%X)",
             reg, max17205RegToStr(reg), *dest_pct, buf);
     }
     return r;
@@ -333,7 +333,7 @@ msg_t max17205ReadCycles(MAX17205Driver *devp, uint16_t *dest_count) {
     if (r == MSG_OK) {
         // Reference datasheet page 33: LSB is 16%, unsigned.
         *dest_count = buf * 16U / 100U;
-        dbgprintf("  max17205ReadCycles(0x%X %s) = %u%% (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadCycles(0x%X %s) = %u%% (raw: 0x%X)",
             MAX17205_AD_CYCLES, max17205RegToStr(MAX17205_AD_CYCLES), *dest_count, buf);
     }
     return r;
@@ -360,7 +360,7 @@ msg_t max17205ReadVoltage(MAX17205Driver *devp, uint16_t reg, uint16_t *dest_mV)
         // Converting to mV using integer math would be buf * 78125 / 1_000_000, but that could
         // overflow a uint32_t so remove the common 5^6 factor from both numbers first.
         *dest_mV = buf * 5U / 64U;
-        dbgprintf("  max17205ReadVoltage(0x%X %s) = %u mV\r\n", reg, max17205RegToStr(reg), *dest_mV);
+        LOG_DBG("  max17205ReadVoltage(0x%X %s) = %u mV", reg, max17205RegToStr(reg), *dest_mV);
     }
     return r;
 }
@@ -376,7 +376,7 @@ msg_t max17205ReadBatt(MAX17205Driver *devp, uint32_t *dest_mV) {
     if (r == MSG_OK) {
         //Reference datasheet page 71: Voltage LSB is 1.25mV, unsigned.
         *dest_mV = buf * 125U / 100U;
-        dbgprintf("  max17205ReadBatt(0x%X %s) = %u mV\r\n",
+        LOG_DBG("  max17205ReadBatt(0x%X %s) = %u mV",
             MAX17205_AD_BATT, max17205RegToStr(MAX17205_AD_BATT), *dest_mV);
     }
     return r;
@@ -418,7 +418,7 @@ msg_t max17205ReadCurrent(MAX17205Driver *devp, uint16_t reg, int32_t *dest_mA) 
     if (r == MSG_OK) {
         // Referencce datasheet table 1: Current LSB is 1.5625μV/RSENSE, signed.
         *dest_mA = (int16_t)((((int32_t)((int16_t)buf)) * 15625) / (devp->rsense_uOhm * 10));
-        dbgprintf("  max17205ReadCurrent(0x%X %s) = %d mA (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadCurrent(0x%X %s) = %d mA (raw: 0x%X)",
             reg, max17205RegToStr(reg), *dest_mA, buf);
     }
     return r;
@@ -464,7 +464,7 @@ msg_t max17205ReadTemperature(MAX17205Driver *devp, uint16_t reg, int32_t *dest_
     if (r == MSG_OK) {
         // Reference Datasheet table 1: Temperature LSB is 1/256C, signed.
         *dest_mC = (int16_t)((int32_t)buf * 1000 / 256);
-        dbgprintf("  max17205ReadTemperature(0x%X %s) = %d mC (%u C) (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadTemperature(0x%X %s) = %d mC (%u C) (raw: 0x%X)",
             reg, max17205RegToStr(reg), *dest_mC, (*dest_mC / 1000), buf);
     }
     return r;
@@ -491,7 +491,7 @@ msg_t max17205ReadAverageTemperature(MAX17205Driver *devp, uint16_t reg, int16_t
         // FIXME: Does that mean signed Celsius or unsigned Kelvin? The converison below
         // assumes signed(!?) Kelvin but this should be checked on a live chip.
         *dest_C = (int16_t)buf / 10 - 273;
-        dbgprintf("  max17205ReadTemperature(0x%X %s) = %d C (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadTemperature(0x%X %s) = %d C (raw: 0x%X)",
             reg, max17205RegToStr(reg), *dest_C, buf);
     }
     return r;
@@ -533,7 +533,7 @@ msg_t max17205ReadResistance(MAX17205Driver *devp, uint16_t reg, uint16_t *dest_
     if (r == MSG_OK) {
         // Reference datasheet table 1: Resistance LSB is 1/4096Ω, Unsigned
         *dest_mOhm = (uint16_t)(((uint32_t)buf * 1000U) / 4096U);
-        dbgprintf("  max17205ReadResistance(0x%X %s) = %u mOhm (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadResistance(0x%X %s) = %u mOhm (raw: 0x%X)",
                   reg, max17205RegToStr(reg), *dest_mOhm, buf);
     }
 
@@ -559,7 +559,7 @@ msg_t max17205ReadTime(MAX17205Driver *devp, uint16_t reg, uint32_t *dest_S) {
     if (r == MSG_OK) {
         // Reference datasheet table 1: Time LSB is 5.625s, unsigned.
         *dest_S = (uint32_t)buf * 5625U / 1000U;
-        dbgprintf("  max17205ReadTime(0x%X %s) = %u seconds (raw: 0x%X)\r\n",
+        LOG_DBG("  max17205ReadTime(0x%X %s) = %u seconds (raw: 0x%X)",
             reg, max17205RegToStr(reg), *dest_S, buf);
     }
     return r;
@@ -593,7 +593,7 @@ msg_t max17205ReadNVWriteCountMaskingRegister(MAX17205Driver *devp, uint16_t *re
     //Determine the number of times NV memory has been written on this chip.
     //See page 85 of the data sheet
 
-    dbgprintf("Reading NV Masking register...\r\n");
+    LOG_DBG("Reading NV Masking register...");
 
     uint16_t value = 0xE2FA;
     msg_t r = max17205Write(devp, MAX17205_AD_COMMAND, value);
@@ -610,7 +610,7 @@ msg_t max17205ReadNVWriteCountMaskingRegister(MAX17205Driver *devp, uint16_t *re
 
 #ifdef DEBUG_PRINT
     uint8_t mm = (buf & 0xFF) & ((buf >> 8) & 0xFF);
-    dbgprintf("Memory Update Masking of register 0x%X is 0x%X\r\n", 0x1ED, mm);
+    LOG_DBG("Memory Update Masking of register 0x%X is 0x%X", 0x1ED, mm);
 #endif
 
     uint8_t num_left = 7;
@@ -633,7 +633,7 @@ msg_t max17205NonvolatileBlockProgram(MAX17205Driver *devp) {
     //  1. Write desired memory locations to new values.
     //should be done prior to calling this function
 
-    dbgprintf("Clearing CommStat.NVError bit\r\n");
+    LOG_DBG("Clearing CommStat.NVError bit");
     //  2. Clear CommStat.NVError bit.
     msg_t r = max17205Write(devp, MAX17205_AD_COMMSTAT, MAX17205_COMMSTAT_NVERROR);
     if (r != MSG_OK) {
@@ -643,39 +643,39 @@ msg_t max17205NonvolatileBlockProgram(MAX17205Driver *devp) {
     //  3. Write 0xE904 to the Command register 0x060 to initiate a block copy.
     r = max17205Write(devp, MAX17205_AD_COMMAND, 0xE904);
     if (r != MSG_OK) {
-        dbgprintf("Initiated failed to send command to initiate block copy....\r\n");
+        LOG_ERR("Initiated failed to send command to initiate block copy....");
         return r;
     }
-    dbgprintf("Initiated MAX17205 block copy....\r\n");
+    LOG_DBG("Initiated MAX17205 block copy....");
 
     //  4. Wait t BLOCK for the copy to complete.
-    dbgprintf("Waiting %u ms for block copy to complete....\r\n", MAX17205_T_BLOCK_MS);
+    LOG_DBG("Waiting %u ms for block copy to complete....", MAX17205_T_BLOCK_MS);
     chThdSleepMilliseconds(MAX17205_T_BLOCK_MS); //tBlock(max) is specified as 7360ms in the data sheet, page 16
 
     uint16_t buf = 0;
     //  5. Check the CommStat.NVError bit. If set, repeat the process. If clear, continue.
     r = max17205Read(devp, MAX17205_AD_COMMSTAT, &buf);
     if (r != MSG_OK) {
-        dbgprintf("Failed to query COMMSTAT register...\r\n");
+        LOG_ERR("Failed to query COMMSTAT register...");
         return r;
     }
 
-    dbgprintf("Read MAX17205_AD_COMMSTAT register 0x%X as 0x%X\r\n", MAX17205_AD_COMMSTAT, buf);
+    LOG_DBG("Read MAX17205_AD_COMMSTAT register 0x%X as 0x%X", MAX17205_AD_COMMSTAT, buf);
     if (buf & MAX17205_COMMSTAT_NVERROR) {
         //Error bit is set
-        dbgprintf("Block copy failed...\r\n");
+        LOG_ERR("Block copy failed...");
         return MSG_RESET;
     }
-    dbgprintf("Block copy was successful, breaking...\r\n");
+    LOG_DBG("Block copy was successful, breaking...");
 
 
     //  6. Write 0x000F to the Command register 0x060 to POR the IC.
     //  7. Wait t POR for the IC to reset.
     //  8. Write 0x0001 to Counter Register 0x0BB to reset firmware.
     //  9. Wait t POR for the firmware to restart.
-    dbgprintf("Reseting MAX17205...\r\n");
+    LOG_DBG("Reseting MAX17205...");
     if ((r = max17205HardwareReset(devp)) != MSG_OK) {
-        dbgprintf("Failed to reset MAX17205\r\n");
+        LOG_ERR("Failed to reset MAX17205");
         return r;
     }
 
@@ -685,7 +685,7 @@ msg_t max17205NonvolatileBlockProgram(MAX17205Driver *devp) {
 msg_t max17205ValidateRegisters(MAX17205Driver *devp, const max17205_regval_t * list, size_t len, bool * valid) {
     osalDbgAssert(devp->state == MAX17205_READY, "max17205ValidateRegisters(), invalid state");
     bool matches = true;
-    dbgprintf("Current and expected NV settings:\r\n");
+    LOG_DBG("Current and expected NV settings:");
     for (size_t i = 0; i < len; ++i) {
         uint16_t buf = 0;
         msg_t r = max17205Read(devp, list[i].reg, &buf);
@@ -693,12 +693,12 @@ msg_t max17205ValidateRegisters(MAX17205Driver *devp, const max17205_regval_t * 
             return r;
         }
         if (buf != list[i].value) {
-            dbgprintf("   %-30s register 0x%04X is 0x%04X     NOT the expected  0x%04X\r\n",
+            LOG_WRN("   %-30s register 0x%04X is 0x%04X     NOT the expected  0x%04X",
                 max17205RegToStr(list[i].reg), list[i].reg,
                 buf, list[i].value);
            matches = false;
         } else {
-            dbgprintf("   %-30s register 0x%04X is 0x%04X     CORRECT\r\n",
+            LOG_DBG("   %-30s register 0x%04X is 0x%04X     CORRECT",
                 max17205RegToStr(list[i].reg), list[i].reg, buf);
         }
     }
@@ -726,7 +726,7 @@ msg_t max17205PrintVolatileMemory(MAX17205Driver *devp) {
         return r;
     }
 
-    dbgprintf("\r\nMAX17205 *Volatile* Registers\r\n");
+    LOG_DBG("\r\nMAX17205 *Volatile* Registers");
     uint16_t volatile_reg_list[] = {
         MAX17205_AD_PACKCFG,
         MAX17205_AD_DESIGNCAP,
@@ -755,7 +755,7 @@ msg_t max17205PrintVolatileMemory(MAX17205Driver *devp) {
         if (r != MSG_OK) {
             return r;
         }
-        dbgprintf("   %-30s register 0x%04X is 0x%04X\r\n", max17205RegToStr(volatile_reg_list[i]), volatile_reg_list[i], buf);
+        LOG_DBG("   %-30s register 0x%04X is 0x%04X", max17205RegToStr(volatile_reg_list[i]), volatile_reg_list[i], buf);
     }
     return MSG_OK;
 }
@@ -770,7 +770,7 @@ msg_t max17205PrintNonvolatileMemory(MAX17205Driver *devp) {
     }
 
     // See table 19 on page 83 of the data sheet to see the list of non-volatile registers
-    dbgprintf("\r\nMAX17205 Non-Volatile Registers\r\n");
+    LOG_DBG("\r\nMAX17205 Non-Volatile Registers");
     uint16_t reg_list[] = {
         MAX17205_AD_NXTABLE0,
         MAX17205_AD_NXTABLE1,
@@ -869,7 +869,7 @@ msg_t max17205PrintNonvolatileMemory(MAX17205Driver *devp) {
         if (r != MSG_OK) {
             return r;
         }
-        dbgprintf("   %-30s register 0x%04X is 0x%04X\r\n", max17205RegToStr(reg_list[i]), reg_list[i], buf);
+        LOG_DBG("   %-30s register 0x%04X is 0x%04X", max17205RegToStr(reg_list[i]), reg_list[i], buf);
     }
     return MSG_OK;
 }
@@ -885,7 +885,7 @@ msg_t max17205ReadHistory(MAX17205Driver *devp)
     //Read all flag information from the IC
     r = max17205Write(devp, MAX17205_AD_COMMAND, 0xE2FB);
     if (r != MSG_OK) {
-        dbgprintf("Failed to send command to read the lower history write flags.\r\n");
+        LOG_ERR("Failed to send command to read the lower history write flags.");
         return r;
     }
     chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
@@ -899,7 +899,7 @@ msg_t max17205ReadHistory(MAX17205Driver *devp)
 
     r = max17205Write(devp, MAX17205_AD_COMMAND, 0xE2FC);
     if (r != MSG_OK) {
-        dbgprintf("Failed to send command to read the upper history write flags.\r\n");
+        LOG_ERR("Failed to send command to read the upper history write flags.");
         return r;
     }
     chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
@@ -918,7 +918,7 @@ msg_t max17205ReadHistory(MAX17205Driver *devp)
 
     r = max17205Write(devp, MAX17205_AD_COMMAND, 0xE2FD);
     if (r != MSG_OK) {
-        dbgprintf("Failed to send command to read the lower history valid flags.\r\n");
+        LOG_ERR("Failed to send command to read the lower history valid flags.");
         return r;
     }
     chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
@@ -931,7 +931,7 @@ msg_t max17205ReadHistory(MAX17205Driver *devp)
 
     r = max17205Write(devp, MAX17205_AD_COMMAND, 0xE2FE);
     if (r != MSG_OK) {
-        dbgprintf("Failed to send command to read the upper history valid flags.\r\n");
+        LOG_ERR("Failed to send command to read the upper history valid flags.");
         return r;
     }
     chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
@@ -970,7 +970,7 @@ msg_t max17205ReadHistory(MAX17205Driver *devp)
     uint16_t history_data;
     uint8_t history_length = 0;
 
-    dbgprintf("History:\r\n");
+    LOG_DBG("History:");
     for(loop = 0; loop < 202; loop++)
     {
         if (!page_good[loop]) {
@@ -978,17 +978,17 @@ msg_t max17205ReadHistory(MAX17205Driver *devp)
         }
         r = max17205Write(devp, MAX17205_AD_COMMAND, 0xE226 + loop);
         if (r != MSG_OK) {
-            dbgprintf("Failed to send command to read the history entry %d\r\n", loop);
+            LOG_ERR("Failed to send command to read the history entry %d", loop);
             return r;
         }
         chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
-        dbgprintf(" Entry %d:\r\n", history_length);
+        LOG_DBG(" Entry %d:", history_length);
         for (i = 0; i < 16; i++) {
             r = max17205Read(devp, 0x1E0 + i, &history_data);
             if (r != MSG_OK) {
                 return r;
             }
-            dbgprintf("   %-30s register 0x%04X is 0x%04X\r\n", max17205RegToStr(0x1A0 + i), 0x1A0 + i, history_data);
+            LOG_DBG("   %-30s register 0x%04X is 0x%04X", max17205RegToStr(0x1A0 + i), 0x1A0 + i, history_data);
         }
         history_length++;
     }
