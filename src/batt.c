@@ -192,40 +192,46 @@ typedef struct {
     bool is_data_valid;
 
     uint32_t batt_mV;
-    uint16_t v_cell_1_mV;
-    uint16_t v_cell_2_mV;
-    uint16_t v_cell_mV;
-    uint16_t v_cell_avg_mV;
     uint16_t v_cell_max_volt_mV;
     uint16_t v_cell_min_volt_mV;
+    uint16_t v_cell_mV;
+    uint16_t v_cell_1_mV;
+    uint16_t v_cell_2_mV;
+    uint16_t v_cell_avg_mV;
 
     int32_t current_mA;
     int32_t avg_current_mA;
     int32_t max_current_mA;
     int32_t min_current_mA;
 
-    uint8_t available_state_of_charge; //Percent
-    uint8_t present_state_of_charge; //Percent
-    uint8_t reported_state_of_charge; //Percent
-
-    uint32_t time_to_full_seconds;
-    uint32_t time_to_empty_seconds;
-
     uint32_t full_capacity_mAh;
+    uint32_t reported_capacity_mAh;
+
+    // the next 2 are not reported over CAN
     uint32_t available_capacity_mAh;
     uint32_t mix_capacity_mAh;
-    uint32_t reported_capacity_mAh;
+
+    uint32_t time_to_empty_seconds;
+    uint32_t time_to_full_seconds;
 
     uint16_t cycles; // count
 
+    uint8_t reported_state_of_charge; //Percent
+
+    // the next 2 are not reported over CAN
+    uint8_t available_state_of_charge; //Percent
+    uint8_t present_state_of_charge; //Percent
+
+    int16_t int_temp_C;
+    int16_t avg_int_temp_C;
+    int8_t temp_max_C;
+    int8_t temp_min_C;
+
+    // the next 4 are not reported over CAN
     int16_t temp_1_C;
     int16_t temp_2_C;
-    int16_t int_temp_C;
     int16_t avg_temp_1_C;
     int16_t avg_temp_2_C;
-    int16_t avg_int_temp_C;
-    int8_t temp_min_C;
-    int8_t temp_max_C;
 } batt_pack_data_t;
 
 #if ENABLE_HEATERS
@@ -920,8 +926,8 @@ static void populate_od_pack_data(pack_t *pack) {
         OD_RAM.x4000_pack_1.reported_state_of_charge = pack_data->reported_state_of_charge;
         OD_RAM.x4000_pack_1.temperature = CLAMP(pack_data->temp_1_C, INT8_MIN, INT8_MAX);
         OD_RAM.x4000_pack_1.temperature_avg = CLAMP(pack_data->avg_temp_1_C, INT8_MIN, INT8_MAX);
-        OD_RAM.x4000_pack_1.temperature_min = pack_data->temp_min_C;
         OD_RAM.x4000_pack_1.temperature_max = pack_data->temp_max_C;
+        OD_RAM.x4000_pack_1.temperature_min = pack_data->temp_min_C;
     } else if (pack->pack_number == 2) {
         OD_RAM.x4001_pack_2.status = state_bitmask;
         OD_RAM.x4001_pack_2.vbatt = MIN(pack_data->batt_mV, UINT16_MAX);
@@ -943,8 +949,8 @@ static void populate_od_pack_data(pack_t *pack) {
         OD_RAM.x4001_pack_2.reported_state_of_charge = pack_data->reported_state_of_charge;
         OD_RAM.x4001_pack_2.temperature = CLAMP(pack_data->temp_1_C, INT8_MIN, INT8_MAX);
         OD_RAM.x4001_pack_2.temperature_avg = CLAMP(pack_data->avg_temp_1_C, INT8_MIN, INT8_MAX);
-        OD_RAM.x4001_pack_2.temperature_min = pack_data->temp_min_C;
         OD_RAM.x4001_pack_2.temperature_max = pack_data->temp_max_C;
+        OD_RAM.x4001_pack_2.temperature_min = pack_data->temp_min_C;
     } else {
         LOG_DBG("ERROR: pack number not expected: %d", pack->pack_number);
     }
