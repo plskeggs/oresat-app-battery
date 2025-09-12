@@ -71,6 +71,251 @@ static void convert_millis(struct sensor_value *val, int32_t val_millis)
     val->val2 = (val_millis % 1000) * 1000;
 }
 
+static void convert_capacity(uint16_t rsense_mohms, const uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet table 1: Capacity LSB is 5.0μVh/RSENSE where Vh/R=Ah, unsigned.
+    valp->val1 = ((uint32_t)raw * 5000U) / rsense_mohms;
+    valp->val2 = 0;
+}
+
+uint16_t write_capacity(const uint16_t raw, uint32_t dest_mAh)
+{
+    // Reference datasheet table 1: Capacity LSB is 5.0μVh/RSENSE where Vh/R=Ah, unsigned.
+    buf = (uint16_t)((dest_mAh * devp->rsense_uOhm) / 5000U);
+    return buf;
+}
+
+/**
+ * @brief   Converts an MAX17205 percentage value from a
+ *          register in 1% increments to be between 0% and 255%.
+ *
+ * @api
+ */
+static void convert_percentage(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet table 1: Percentage LSB is 1/256%, unsigned.
+    valp->val1 = raw / 256U;
+    valp->val2 = 0;
+}
+
+/* dest_count will be between 0 and 10485 cycles */
+static void convert_cycles(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet page 33: LSB is 16%, unsigned.
+    valp->val1 = raw * 16U / 100U;
+    valp->val2 = 0;
+}
+
+/**
+ * @brief   converts a MAX17205 voltage value from a register to
+ *          mV.
+ */
+static void convert_voltage(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet Table 1: Voltage LSB is 0.078125mV, unsigend.
+    // Converting to mV using integer math would be buf * 78125 / 1_000_000, but that could
+    // overflow a uint32_t so remove the common 5^6 factor from both numbers first.
+    valp->val1 = raw * 5U / 64U;
+    valp->val2 = 0;
+}
+
+/**
+ * dest_mV will be between 0 and 81,918mV but realistically can be
+ * at most 76.8V in a 15 cell configuration.
+ */
+static void convert_batt_voltage(uint16_t raw, struct sensor_value *valp)
+{
+    //Reference datasheet page 71: Voltage LSB is 1.25mV, unsigned.
+    valp->val1 = raw * 125U / 100U;
+    valp->val2 = 0;
+}
+
+/**
+ * max_mV can be between 0mV and 5100mV, starting at 0.
+ */
+static void convert_max_voltage(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet page 71: register MaxMinVolt is two 8 bit unsigned values with
+    // 20mV/LSB, the upper byte being max and lower byte min.
+    valp->val1 = (raw >> 8) * 20;   // max
+    valp->val2 = 0;
+}
+
+/**
+ * min_mV can be between 0mV and 5100mV, starting at 5100.
+ */
+static void convert_min_voltage(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet page 71: register MaxMinVolt is two 8 bit unsigned values with
+    // 20mV/LSB, the upper byte being max and lower byte min.
+    valp->val1 = (raw & 0xFF) * 20; // min
+    valp->val2 = 0;
+}
+
+/**
+ * @brief Converts current value from a register to mA
+ * @details  dest_mA can be between -51,200,000mA and 51,198,437mA but typically
+ *           between -5,120mA and 5,119mA depending on rsense_uOhm.
+ */
+static void convert_current(uint16_t raw, struct sensor_value *valp)
+{
+    // Referencce datasheet table 1: Current LSB is 1.5625μV/RSENSE, signed.
+    valp->val1 = (int16_t)((((int32_t)((int16_t)raw)) * 15625) / (devp->rsense_uOhm * 10));
+    valp->val2 = 0;
+}
+
+/**
+ * Both max_mA and min_mA can be between -102,400,000mA and 102,000,000mA but typically
+ * between -10,240mA and 10,200mA depending on rsense_mohhm.
+ * max_mA starts at the minimum value.
+ */
+static void convert_max_current(uint16_t rsense_mohms, uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet page 73: MaxMinCurrent is two packed signed 1 byte values with
+    // LSB of 0.40mV/RSENSE.
+    int32_t max_raw = ((raw >> 8) * 0xFFU) & 0xFFU;
+
+    valp->val1 = (int16_t)((max_raw * 400) / rsense_mohms);
+    valp->val2 = 0;
+}
+
+/**
+ * Both max_mA and min_mA can be between -102,400,000mA and 102,000,000mA but typically
+ * between -10,240mA and 10,200mA depending on rsense_mohhm.
+ * min_mA starts at the maximum value.
+ */
+static void convert_min_current(uint16_t rsense_mohms, uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet page 73: MaxMinCurrent is two packed signed 1 byte values with
+    // LSB of 0.40mV/RSENSE.
+    int32_t min_raw = raw & 0xFFU;
+
+    valp->val1 = (int16_t)((min_raw * 400) / rsense_mohms);
+    valp->val2 = 0;
+}
+
+/**
+ * @brief   Converts an MAX17205 temperature value from a
+ *          register in 0.001C increments.
+ * @details  dest_mC will be between -256,000mC and 255,996mC.
+ */
+static void convert_temperature(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference Datasheet table 1: Temperature LSB is 1/256C, signed.
+    valp->val1 = (int16_t)((int32_t)raw * 1000 / 256);
+    valp->val2 = 0;
+}
+
+/**
+ * @brief   Converts an MAX17205 temperature value from a
+ *          register in 0.1K increments to result in C.
+ */
+static void convert_average_temperature(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet page 77: "These registers display temperature in degrees
+    // Celsius starting at absolute zero, -273ºC or 0ºK with an LSb of 0.1ºC."
+    // FIXME: Does that mean signed Celsius or unsigned Kelvin? The converison below
+    // assumes signed(!?) Kelvin but this should be checked on a live chip.
+    valp->val1 = (int16_t)raw / 10 - 273;
+    valp->val2 = 0;
+}
+
+/**
+ * max_C will be between -128C and 127C.
+ */
+static void convert_max_temperature(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datahseet page 76: Two packed signed 1 byte Celceus values with 1C/LSB, with
+    // the upper byte max and lower byte min.
+    valp->val1 = raw >> 8;   // max
+    valp->val2 = 0;
+}
+
+/**
+ * min_C will be between -128C and 127C.
+ */
+static void convert_min_temperature(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datahseet page 76: Two packed signed 1 byte Celceus values with 1C/LSB, with
+    // the upper byte max and lower byte min.
+    valp->val1 = raw & 0xFF; // min
+    valp->val2 = 0;
+}
+
+/**
+ * @brief Converts an MAX17205 resistance value from a register
+ *          in mOhms to a value between 0mOhm and 15,999mOhm.
+ */
+
+static void convert_resistance(uint16_t raw, uint16_t *dest_mohm) {
+    // Reference datasheet table 1: Resistance LSB is 1/4096Ω, Unsigned
+    *dest_mohm = (uint16_t)(((uint32_t)raw * 1000U) / 4096U);
+}
+
+/**
+ * @brief   Reads an MAX17205 time value from a register to
+ *          seconds between 0S and 368,634S.
+ */
+static void convert_time(uint16_t raw, struct sensor_value *valp)
+{
+    // Reference datasheet table 1: Time LSB is 5.625s, unsigned.
+    valp->val1 = (uint32_t)raw * 5625U / 1000U;
+    valp->val2 = 0;
+}
+
+static void convert_learn_state(uint16_t raw, struct sensor_value *valp)
+{
+    *dest = _FLD2VAL(MAX17205_LEARNCFG_LS, raw);
+}
+
+static void max17205WriteLearnState(uint8_t state) {
+    uint16_t buf = MAX17205_SETVAL(MAX17205_AD_NLEARNCFG, _VAL2FLD(MAX17205_LEARNCFG_LS, state));
+    int rc = max17205Write(devp, MAX17205_AD_NLEARNCFG, buf);
+    return rc;
+}
+
+/**
+ * The MAX17205 allows for the NV ram to be written no more then 7 times on a single chip.
+ * Each time, an additional bit is set in a flash register which can be queried.
+ *
+ * TODO document this
+ */
+static void max17205ReadNVWriteCountMaskingRegister(uint16_t *reg_dest, uint8_t *number_of_writes_left) {
+    //Determine the number of times NV memory has been written on this chip.
+    //See page 85 of the data sheet
+
+    LOG_DBG("Reading NV Masking register...");
+
+    uint16_t value = 0xE2FA;
+    int rc = max17205Write(devp, MAX17205_AD_COMMAND, value);
+    if (rc != 0 ) {
+        return rc;
+    }
+    chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
+
+    uint16_t buf;
+    rc = max17205Read(devp, 0x1ED, &buf);
+    if (rc != 0) {
+        return rc;
+    }
+
+#ifdef DEBUG_PRINT
+    uint8_t mm = (buf & 0xFF) & ((buf >> 8) & 0xFF);
+    LOG_DBG("Memory Update Masking of register 0x%X is 0x%X", 0x1ED, mm);
+#endif
+
+    uint8_t num_left = 7;
+    for(uint8_t i = 0; i < 8; i++) {
+        if (buf & (1<<i) && num_left > 0) {
+            num_left--;
+        }
+    }
+
+    *reg_dest = buf;
+    *number_of_writes_left = num_left;
+    return 0;
+}
+
 /**
  * @brief Convert raw register values for specific channel
  *
@@ -85,103 +330,127 @@ static int max17205_channel_get(const struct device *dev, enum sensor_channel ch
 {
     const struct max17205_config *const config = dev->config;
     struct max17205_data *const data = dev->data;
-    int32_t tmp;
+    int16_t raw;
 
     switch (chan) {
-    case SENSOR_CHAN_GAUGE_VOLTAGE:
-        /* Get voltage in uV */
-        tmp = data->voltage * VOLTAGE_MULTIPLIER_UV;
-        /* Convert to V */
-        valp->val1 = tmp / 1000000;
-        valp->val2 = tmp % 1000000;
+    case MAX17205_CHAN_TEMP_1:
+        raw = data->temp_1;
+        convert_average_temperature(raw, valp);
         break;
-    case SENSOR_CHAN_GAUGE_AVG_CURRENT: {
-        int current;
-        /* Get avg current in nA */
-        current = data->avg_current * CURRENT_MULTIPLIER_NA;
-        /* Convert to mA */
-        valp->val1 = current / 1000000;
-        valp->val2 = current % 1000000;
+    case MAX17205_CHAN_TEMP_2:
+        raw = data->temp_2;
+        convert_average_temperature(raw, valp);
         break;
-    }
-
-    /** Standby current, in amps (negative=discharging) **/
-    case SENSOR_CHAN_GAUGE_STDBY_CURRENT:
-        break;
-    /** Max load current, in amps (negative=discharging) **/
-    case SENSOR_CHAN_GAUGE_MAX_LOAD_CURRENT:
-        break;
-
     case SENSOR_CHAN_GAUGE_TEMP:
-        valp->val1 = data->internal_temp / 256;
-        valp->val2 = data->internal_temp % 256 * 1000000 / 256;
+        raw = data->int_temp;
+        convert_average_temperature(raw, valp);
         break;
-    case SENSOR_CHAN_GAUGE_STATE_OF_CHARGE:
-        valp->val1 = data->state_of_charge / 256;
-        valp->val2 = data->state_of_charge % 256 * 1000000 / 256;
+    case MAX17205_CHAN_AVG_TEMP_1:
+        raw = data->avg_temp_1;
+        convert_average_temperature(raw, valp);
+        break;
+    case MAX17205_CHAN_AVG_TEMP_2:
+        raw = data->avg_temp_2;
+        convert_average_temperature(raw, valp);
+        break;
+    case MAX17205_CHAN_AVG_INT_TEMP:
+        raw = data->avg_int_temp;
+        convert_average_temperature(raw, valp);
+        break;
+    case MAX17205_CHAN_TEMP_MAX:
+        raw = data->temp_max_C;
+        convert_max_temperature(raw, valp);
+        break;
+    case MAX17205_CHAN_TEMP_MIN:
+        raw = data->temp_min_C;
+        convert_min_temperature(raw, valp);
+        break;
+    case MAX17205_CHAN_V_CELL_1:
+        raw = data->v_cell_1;
+        convert_voltage(raw, valp);
+        break;
+    case MAX17205_CHAN_V_CELL_2:
+        raw = data->v_cell_2;
+        convert_voltage(raw, valp);
+        break;
+    case MAX17205_CHAN_V_CELL_AVG:
+        raw = data->v_cell_avg;
+        convert_voltage(raw, valp);
+        break;
+    case MAX17205_CHAN_V_CELL:
+        raw = data->v_cell;
+        convert_voltage(raw, valp);
+        break;
+    case SENSOR_CHAN_GAUGE_VOLTAGE:
+        raw = data->v_batt;
+        convert_batt_voltage(raw, valp);
+        break;
+    case MAX17205_CHAN_V_CELL_MAX:
+        raw = data->v_cell_max;
+        convert_max_voltage(raw, valp);
+        break;
+    case MAX17205_CHAN_V_CELL_MIN:
+        raw = data->v_cell_min;
+        convert_min_voltage(raw, valp);
+        break;
+    case SENSOR_CHAN_CURRENT:
+        raw = data->current;
+        convert_current(raw, valp);
+        break;
+    case SENSOR_CHAN_GAUGE_AVG_CURRENT:
+        raw = data->avg_current;
+        convert_current(raw, valp);
+        break;
+    case MAX17205_CHAN_CURRENT_MAX:
+        raw = data->current_max;
+        convert_max_current(config->rsense_mohms, raw, valp);
+        break;
+    case MAX17205_CHAN_CURRENT_MIN:
+        raw = data->current_min;
+        convert_min_current(config->rsense_mohms, raw, valp);
         break;
     case SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY:
-        convert_millis(valp, data->full_cap);
+        raw = data->full_cap;
+        convert_capacity(config->rsense_mohms, raw, valp);
         break;
     case SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY:
-        convert_millis(valp, data->remaining_cap);
+        raw = data->available_cap;
+        convert_capacity(config->rsense_mohms, raw, valp);
+        break;
+    case MAX17205_CHAN_MIX_CAPACITY:
+        raw = data->mix_cap;
+        convert_capacity(config->rsense_mohms, raw, valp);
         break;
     case SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY:
-        convert_millis(valp, data->design_cap);
+        raw = data->reported_cap;
+        convert_capacity(config->rsense_mohms, raw, valp);
         break;
-
-	/** Full Available Capacity in mAh **/
-    case SENSOR_CHAN_GAUGE_FULL_AVAIL_CAPACITY:
-        break;
-    /** Average power in mW **/
-    case SENSOR_CHAN_GAUGE_AVG_POWER:
-        break;
-    /** State of health measurement in % **/
-    case SENSOR_CHAN_GAUGE_STATE_OF_HEALTH:
-        break;
-
     case SENSOR_CHAN_GAUGE_TIME_TO_EMPTY:
-        /* Get time in ms */
-        if (data->time_to_empty == 0xffff) {
-            valp->val1 = 0;
-            valp->val2 = 0;
-        } else {
-            tmp = data->time_to_empty * TIME_MULTIPLIER_MS;
-            convert_millis(valp, tmp);
-        }
+        raw = data->time_to_empty;
+        convert_time(raw, valp);
         break;
     case SENSOR_CHAN_GAUGE_TIME_TO_FULL:
-        /* Get time in ms */
-        if (data->time_to_full == 0xffff) {
-            valp->val1 = 0;
-            valp->val2 = 0;
-        } else {
-            tmp = data->time_to_full * TIME_MULTIPLIER_MS;
-            convert_millis(valp, tmp);
-        }
+        raw = data->time_to_full;
+        convert_time(raw, valp);
+        break;
+    case MAX17205_CHAN_AVAILABLE_SOC:
+        raw = data->available_soc;
+        convert_percentage(raw, valp);
+        break;
+    case MAX17205_CHAN_PRESENT_SOC:
+        raw = data->present_soc;
+        convert_percentage(raw, valp);
+        break;
+    case MAX17205_CHAN_REPORTED_SOC:
+        raw = data->reported_soc;
+        convert_percentage(raw, valp);
         break;
     case SENSOR_CHAN_GAUGE_CYCLE_COUNT:
-        valp->val1 = data->cycle_count / 100;
-        valp->val2 = data->cycle_count % 100 * 10000;
-        break;
-    case SENSOR_CHAN_GAUGE_DESIGN_VOLTAGE:
-        convert_millis(valp, config->design_voltage);
-        break;
-    case SENSOR_CHAN_GAUGE_DESIRED_VOLTAGE:
-        convert_millis(valp, config->desired_voltage);
-        break;
-    case SENSOR_CHAN_GAUGE_DESIRED_CHARGING_CURRENT:
-        valp->val1 = data->ichg_term;
-        valp->val2 = 0;
-        break;
-    case MAX17205_COULOMB_COUNTER:
-        /* Get spent capacity in mAh */
-        data->coulomb_counter = 0xffff - data->coulomb_counter;
-        valp->val1 = data->coulomb_counter / 2;
-        valp->val2 = data->coulomb_counter % 2 * 10 / 2;
+        raw = data->cycle_count;
+        convert_cycles(raw, valp);
         break;
     default:
-        LOG_ERR("Unsupported channel!");
+        LOG_ERR("Unsupported channel %d!", chan);
         return -ENOTSUP;
     }
 
