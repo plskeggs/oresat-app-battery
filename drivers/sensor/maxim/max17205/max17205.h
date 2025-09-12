@@ -9,10 +9,6 @@
 
 #include <zephyr/drivers/i2c.h>
 
-#define VOLTAGE_MULTIPLIER_UV	1250 / 16
-#define CURRENT_MULTIPLIER_NA	156250
-#define TIME_MULTIPLIER_MS	5625
-
 #define MAX17205_T_RECAL_MS      5
 //tBlock(max) is specified as 7360ms in the data sheet, page 16
 #define MAX17205_T_BLOCK_MS      8000
@@ -1040,7 +1036,6 @@ enum max17205_attribute {
     // a specific register, e.g. MAX17205_ATTR_REGS + MAX17205_AD_LEARNCFG
 };
 
-
 struct max17205_data {
 	/* Raw register values */
 	int16_t temp_1;         // MAX17205_CHAN_TEMP_1
@@ -1074,25 +1069,25 @@ struct max17205_data {
 	uint16_t cycle_count;   // SENSOR_CHAN_GAUGE_CYCLE_COUNT,
 };
 
+// TODO put this in the device tree in the pack_flags field
+#define MAX17205_PACKCFG_VAL = (MAX17205_PACKCFG_BTEN | // enable Vbatt channel
+                                MAX17205_PACKCFG_CHEN | // enable voltage measurements cell1, cell2, Vbatt
+                                MAX17205_PACKCFG_TDEN | // enable die temperature measurement
+                                MAX17205_PACKCFG_A1EN | // enable AIN1 channel temperature measurement
+                                MAX17205_PACKCFG_A2EN); // enable AIN2 channel temperature measurement
+
 struct max17205_config {
 	struct i2c_dt_spec i2c;
+	/* Number of cells in the pack */
+	uint16_t num_cells;
+	/* Cell balance threshold in mV */
+	uint16_t cell_bal_thresh_voltage;
+	/* Pack configuration flags */
+	uint16_t pack_flags;
 	/* Value of Rsense resistor in milliohms (typically 5 or 10) */
 	uint16_t rsense_mohms;
-	/* Design voltage of cell in mV */
-	uint16_t design_voltage;
-	/* Desired voltage of cell in mV */
-	uint16_t desired_voltage;
-	/* Desired charging current in mA */
-	uint16_t desired_charging_current;
-	/* Battery capacity in mAh */
-	uint16_t design_cap;
-	/* Empty voltage detection in mV */
-	uint16_t empty_voltage;
-	/* Recovery voltage detection in mV */
-	uint16_t recovery_voltage;
-	/* Defined charge voltage value in mV */
-	uint16_t charge_voltage;
 };
+
 /**
  * @brief   Structure to store register:value pairs for configuration
  */

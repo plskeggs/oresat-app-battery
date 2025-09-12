@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) 2021 Matija Tudan
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+&arduino_i2c {
+	status = "okay";
+
+	max17205@6C {
+		compatible = "maxim,max17205";
+		reg = <0x6C>;
+        /* NOTE: this device has two I2C slave addresses. They are used to access
+         * different sets of register addresses. Ensure your system does not place
+         * another device on the I2C bus which responds to the below aux-addr.
+         */
+        aux-addr = <0x16>;
+        num-cells = <2>;
+        cell-bal-thresh-voltage = <40>;
+        pack-flags = <0x3E00>;
+		rsense-mohms = <10>;
+		status = "okay";
+	};
+};
