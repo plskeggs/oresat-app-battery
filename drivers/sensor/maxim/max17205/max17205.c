@@ -80,10 +80,10 @@ static void convert_capacity(uint16_t rsense_mohms, const uint16_t raw, struct s
     valp->val2 = 0;
 }
 
-uint16_t write_capacity(const uint16_t raw, uint32_t dest_mAh)
+uint16_t write_capacity(uint16_t rsense_mohms, const uint16_t raw, uint32_t dest_mAh)
 {
     // Reference datasheet table 1: Capacity LSB is 5.0μVh/RSENSE where Vh/R=Ah, unsigned.
-    buf = (uint16_t)((dest_mAh * devp->rsense_uOhm) / 5000U);
+    buf = (uint16_t)((dest_mAh * rsense_mohms) / 5000U);
     return buf;
 }
 
@@ -270,10 +270,8 @@ static void convert_learn_state(uint16_t raw, struct sensor_value *valp)
     *dest = _FLD2VAL(MAX17205_LEARNCFG_LS, raw);
 }
 
-static void max17205WriteLearnState(uint8_t state) {
-    uint16_t buf = MAX17205_SETVAL(MAX17205_AD_NLEARNCFG, _VAL2FLD(MAX17205_LEARNCFG_LS, state));
-    int rc = max17205Write(devp, MAX17205_AD_NLEARNCFG, buf);
-    return rc;
+static uint16_t encode_learn_state(uint8_t state) {
+    return MAX17205_SETVAL(MAX17205_AD_NLEARNCFG, _VAL2FLD(MAX17205_LEARNCFG_LS, state));
 }
 
 /**
@@ -451,6 +449,9 @@ static int max17205_channel_get(const struct device *dev, enum sensor_channel ch
         raw = data->cycle_count;
         convert_cycles(raw, valp);
         break;
+    case MAX17205_CHAN_LEARN_STAGE:
+        raw = data->learn_stage;
+        convert_learn_state(raw, valp);
     default:
         LOG_ERR("Unsupported channel %d!", chan);
         return -ENOTSUP;
@@ -588,6 +589,9 @@ static int max17205_sample_fetch(const struct device *dev, enum sensor_channel c
         reg_addr = MAX17205_AD_CYCLES;
         data = &data->cycle_count;
         break;
+    case MAX17205_CHAN_LEARN_STAGE:
+        reg_addr = MAX17205_AD_LEARNCFG;
+        data = &data->learn_stage;
     default:
         LOG_ERR("Unknown channel: %d", chan);
         return -ENOTSUP;
@@ -722,7 +726,7 @@ static int max17205_attr_set(const struct device *dev,
                              enum sensor_attribute attr,
                              const struct sensor_value *val)
 {
-    int rc;
+    int rc = 0;
 
     switch (attr) {
     case MAX17205_ATTR_HW_RESET:
@@ -731,15 +735,25 @@ static int max17205_attr_set(const struct device *dev,
     case MAX17205_ATTR_FW_RESET:
         rc = max17205_firmware_reset(dev);
         break;
+    case MAX17205_ATTR_CAPACITY:
+        break;
+    case MAX17205_ATTR_LEARN_STAGE:
+        break;
+    case MAX17205_ATTR_NV_BLOCK_PROGRAM:
+        break;
     default:
-        if (attr >= MAX17205_ATTR_REGS) {
-            uint8_t reg_addr;
+        if ((unsigned int)attr >= MAX17205_ATTR_REGS) {
+            uint16_t reg_addr = (unsigned int)attr - MAX17205_ATTR_REGS;
 
-            reg_addr = attr - MAX17205_ATTR_REGS;
+            if (reg_addr > MAX17205_AD_MAXVALUE) {
+                return -EINVAL;
+            }
             rc = max17205_reg_write(dev, reg_addr, val->val1 & 0x0ffffU);
+        } else {
+            rc = -ENOTSUP;
         }
     }
-
+    return rc;
 }
 
 static int max17205_attr_get(const struct device *dev,
@@ -747,7 +761,52 @@ static int max17205_attr_get(const struct device *dev,
                              enum sensor_attribute attr,
                              struct sensor_value *val)
 {
+    const struct max17205_config *const config = dev->config;
+    int rc;
 
+    switch (attr) {
+    case MAX17205_ATTR_CAPACITY:
+        {
+            switch (chan) {
+            case SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY:
+            case SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY:
+            case MAX17205_CHAN_MIX_CAPACITY:
+            case SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY:
+                rc = max17205_sample_fetch(dev, chan)
+                if (!rc) {
+                    rc = max17205_channel_get(dev, chan, val);
+                }
+                break;
+            }
+        }
+        break;
+    case MAX17205_ATTR_LEARN_STAGE:
+        chan = MAX17205_CHAN_LEARN_STAGE;
+        rc = max17205_sample_fetch(dev, chan)
+        if (!rc) {
+            rc = max17205_channel_get(dev, chan, val);
+        }
+        break;
+    case MAX17205_ATTR_NV_WRITES_LEFT:
+        rc = max17205_
+        break;
+    default:
+        if ((unsigned int)attr >= MAX17205_ATTR_REGS) {
+            uint16_t reg_addr = (unsigned int)attr - MAX17205_ATTR_REGS;
+            int16_t rd_val;
+
+            if (reg_addr <= MAX17205_AD_MAXVALUE) {
+                rc = max17205_reg_read(dev, reg_addr, &rd_val);
+                val->val1 = ((int32_t)rd_val & 0x0ffffU);
+                val->val2 = 0;
+            } else {
+                rc = -EINVAL;
+            }
+        } else {
+            rc = -ENOTSUP;
+        }
+    }
+    return rc;
 }
 
 /**

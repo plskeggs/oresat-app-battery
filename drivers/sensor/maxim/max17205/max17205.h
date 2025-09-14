@@ -206,6 +206,7 @@ enum {
     MAX17205_AD_NDEVICENAME2 = 0x1DDU,
     MAX17205_AD_NDEVICENAME3 = 0x1DEU,
     MAX17205_AD_NDEVICENAME4 = 0x1DFU,
+	MAX17205_AD_MAXVALUE = 0x1FFU
 };
 
 /**
@@ -1021,6 +1022,7 @@ enum max17205_channel {
 	MAX17205_CHAN_AVAILABLE_SOC,
 	MAX17205_CHAN_PRESENT_SOC,
 	MAX17205_CHAN_REPORTED_SOC,
+	MAX17205_CHAN_LEARN_STAGE,
 	// SENSOR_CHAN_GAUGE_CYCLE_COUNT
 };
 
@@ -1028,12 +1030,24 @@ enum max17205_attribute {
     MAX17205_ATTR_START = SENSOR_ATTR_PRIV_START,
     // place misc. attributes here
 
-	MAX17205_ADDR_HW_RESET,
-	MAX17205_ADDR_FW_RESET,
+	MAX17205_ATTR_HW_RESET,
+	MAX17205_ATTR_FW_RESET,
+	/* Read and write capacity value for specified channel, in mAh, via val->val1. */
+	MAX17205_ATTR_CAPACITY,
+	/* Read and write the learning stage (0-7); set val->val1 to stage. */
+	MAX17205_ATTR_LEARN_STAGE,
+	/* Read number of NV writes left for register set (0-7). */
+	MAX17205_ATTR_NV_WRITES_LEFT,
+	/* Program the NV registers as currently set (if any writes remain).
+	 * Takes up to 8 seconds to complete.
+	 */
+	MAX17205_ATTR_NV_BLOCK_PROGRAM,
 
+    /* Add MAX17205_ATTR_REGS with register address to get attribute to read/write
+	 * a specific register, e.g. MAX17205_ATTR_REGS + MAX17205_AD_LEARNCFG.
+	 */
     MAX17205_ATTR_REGS = MAX17205_ATTR_START + 0x100,
-    // add MAX17205_ATTR_REGS with register address to get attribute to read/write
-    // a specific register, e.g. MAX17205_ATTR_REGS + MAX17205_AD_LEARNCFG
+	MAX17205_ATTR_REGS_END = MAX17205_ATTR_REGS + MAX17205_AD_MAXVALUE
 };
 
 struct max17205_data {
@@ -1067,6 +1081,7 @@ struct max17205_data {
 	uint16_t present_soc;   // MAX17205_CHAN_PRESENT_SOC,
 	uint16_t reported_soc;  // MAX17205_CHAN_REPORTED_SOC,
 	uint16_t cycle_count;   // SENSOR_CHAN_GAUGE_CYCLE_COUNT,
+	uint16_t learn_stage;   // MAX17205_CHAN_LEARN_STAGE
 };
 
 // TODO put this in the device tree in the pack_flags field
@@ -1078,6 +1093,9 @@ struct max17205_data {
 
 struct max17205_config {
 	struct i2c_dt_spec i2c;
+	struct i2c_dt_spec i2c_aux;
+	/* I2C slave address for secondary register bank */
+	uint16_t aux_addr;
 	/* Number of cells in the pack */
 	uint16_t num_cells;
 	/* Cell balance threshold in mV */
