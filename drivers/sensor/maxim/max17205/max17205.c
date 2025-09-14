@@ -80,7 +80,7 @@ static void convert_capacity(uint16_t rsense_mohms, const uint16_t raw, struct s
     valp->val2 = 0;
 }
 
-uint16_t write_capacity(uint16_t rsense_mohms, const uint16_t raw, uint32_t dest_mAh)
+uint16_t encode_capacity(uint16_t rsense_mohms, uint32_t dest_mAh)
 {
     // Reference datasheet table 1: Capacity LSB is 5.0μVh/RSENSE where Vh/R=Ah, unsigned.
     buf = (uint16_t)((dest_mAh * rsense_mohms) / 5000U);
@@ -265,54 +265,202 @@ static void convert_time(uint16_t raw, struct sensor_value *valp)
     valp->val2 = 0;
 }
 
-static void convert_learn_state(uint16_t raw, struct sensor_value *valp)
+static int16_t convert_learn_state(uint16_t raw, struct sensor_value *valp)
 {
-    *dest = _FLD2VAL(MAX17205_LEARNCFG_LS, raw);
+    valp->val1 = _FLD2VAL(MAX17205_LEARNCFG_LS, raw) & 0x0FFFFU;
+    valp->val2 = 0;
 }
 
-static uint16_t encode_learn_state(uint8_t state) {
+static uint16_t encode_learn_state(uint8_t state)
+{
     return MAX17205_SETVAL(MAX17205_AD_NLEARNCFG, _VAL2FLD(MAX17205_LEARNCFG_LS, state));
 }
 
 /**
  * The MAX17205 allows for the NV ram to be written no more then 7 times on a single chip.
- * Each time, an additional bit is set in a flash register which can be queried.
- *
- * TODO document this
+ * Each time, an additional bit is set in a flash register which can be queried. 
+ * See page 85 of the data sheet.
  */
-static void max17205ReadNVWriteCountMaskingRegister(uint16_t *reg_dest, uint8_t *number_of_writes_left) {
-    //Determine the number of times NV memory has been written on this chip.
-    //See page 85 of the data sheet
+static int max17205_read_writes_remaining(const struct device *dev, uint32_t *number_of_writes_left)
+{
+    int rc;
+    uint16_t buf;
 
     LOG_DBG("Reading NV Masking register...");
 
-    uint16_t value = 0xE2FA;
-    int rc = max17205Write(devp, MAX17205_AD_COMMAND, value);
-    if (rc != 0 ) {
-        return rc;
-    }
-    chThdSleepMilliseconds(MAX17205_T_RECAL_MS);
-
-    uint16_t buf;
-    rc = max17205Read(devp, 0x1ED, &buf);
-    if (rc != 0) {
+    rc = max17205_reg_write(dev, MAX17205_AD_COMMAND, 0xE2FA);
+    if (rc ) {
         return rc;
     }
 
-#ifdef DEBUG_PRINT
-    uint8_t mm = (buf & 0xFF) & ((buf >> 8) & 0xFF);
-    LOG_DBG("Memory Update Masking of register 0x%X is 0x%X", 0x1ED, mm);
-#endif
+    k_sleep(K_MSEC(MAX17205_T_RECAL_MS));
 
-    uint8_t num_left = 7;
-    for(uint8_t i = 0; i < 8; i++) {
-        if (buf & (1<<i) && num_left > 0) {
-            num_left--;
+    rc = max17205_reg_read(dev, 0x1ED, &buf);
+    if (rc) {
+        return rc;
+    }
+
+    *number_of_writes_left = 7;
+    for (uint8_t i = 0; i < 8; i++) {
+        if ((buf & (1 << i)) && (*number_of_writes_left > 0)) {
+            *number_of_writes_left--;
         }
     }
 
-    *reg_dest = buf;
-    *number_of_writes_left = num_left;
+    return 0;
+}
+
+/**
+ * See page 85 of the data sheet
+ */
+static int max17205_nv_program(const struct device *dev) {
+    int rc;
+    uint16_t buf = 0;
+
+    //  1. Write desired memory locations to new values.
+    //should be done prior to calling this function
+
+    LOG_DBG("Clearing CommStat.NVError bit");
+    //  2. Clear CommStat.NVError bit.
+    rc = max17205_reg_write(dev, MAX17205_AD_COMMSTAT, MAX17205_COMMSTAT_NVERROR);
+    if (rc) {
+        LOG_ERR("Error cleanring NVError bit: %d", rc);
+        return rc;
+    }
+
+    //  3. Write 0xE904 to the Command register 0x060 to initiate a block copy.
+    rc = max17205_reg_write(dev, MAX17205_AD_COMMAND, 0xE904);
+    if (rc) {
+        LOG_ERR("Failed to send command to initiate block copy: %d", rc);
+        return rc;
+    }
+    LOG_DBG("Initiated MAX17205 block copy....");
+
+    //  4. Wait t BLOCK for the copy to complete.
+    LOG_DBG("Waiting %u ms for block copy to complete....", MAX17205_T_BLOCK_MS);
+    // tBlock(max) is specified as 7360ms in the data sheet, page 16
+    k_sleep(K_MSEC(MAX17205_T_BLOCK_MS));
+
+    //  5. Check the CommStat.NVError bit. If set, repeat the process. If clear, continue.
+    rc = max17205_reg_read(dev, MAX17205_AD_COMMSTAT, &buf);
+    if (rc) {
+        LOG_ERR("Failed to query COMMSTAT register: %d", rc);
+        return rc;
+    }
+
+    LOG_DBG("Read MAX17205_AD_COMMSTAT register 0x%X as 0x%X", MAX17205_AD_COMMSTAT, buf);
+    if (buf & MAX17205_COMMSTAT_NVERROR) {
+        //Error bit is set
+        LOG_ERR("Block copy failed.");
+        return -EIO;
+    }
+    LOG_DBG("Block copy successful");
+
+    //  6. Write 0x000F to the Command register 0x060 to POR the IC.
+    //  7. Wait t POR for the IC to reset.
+    //  8. Write 0x0001 to Counter Register 0x0BB to reset firmware.
+    //  9. Wait t POR for the firmware to restart.
+    LOG_DBG("Resetting MAX17205...");
+    if ((rc = max17205_hardware_reset(dev)) != 0) {
+        LOG_ERR("Failed to reset MAX17205: %d", rc);
+        return rc;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief   Firmware reset the chip. Allows it to utilize any
+ *          changes written to the shadow RAM register.
+ *
+ * @param[in] devp      pointer to the @p MAX17205Driver object
+ *
+ * @api
+ */
+int max17205_firmware_reset(const struct device *dev) {
+
+    int rc;
+
+    LOG_DBG("Performing MAX17205 firmware reset");
+    // Now firmware-reset the chip so it will use the values written to various registers
+    rc = max17205_reg_write(dev, MAX17205_AD_CONFIG2, MAX17205_CONFIG2_POR_CMD);
+    k_sleep(K_MSEC(MAX17205_T_POR_MS));
+
+    return rc;
+}
+
+/**
+ * @brief   Hardware reset the chip. Reloads nonvolatile
+ *          registers into shadow RAM.
+ *
+ * @param[in] devp      pointer to the @p MAX17205Driver object
+ *
+ * @api
+ */
+int max17205_hardware_reset(const struct device *dev) {
+    int rc;
+
+    rc = max17205_reg_write(dev, MAX17205_AD_STATUS, 0);
+    if (rc) {
+        LOG_ERR("Unable to clear POR status bit: %d", rc);
+    }
+
+    LOG_DBG("Performing MAX17205 hardware reset");
+    rc = max17205_reg_write(dev, MAX17205_AD_COMMAND, MAX17205_COMMAND_HARDWARE_RESET);
+    if (rc) {
+        LOG_ERR("Failed to write hardware reset command: %d", rc);
+        return rc;
+    }
+
+    k_sleep(K_MSEC(MAX17205_T_POR_MS));
+
+    // Not sure this polling loop is needed; datasheet only mentions waiting tPOR.
+    uint32_t check_count = 0;
+    uint16_t status = 0;
+    do {
+        rc = max17205_reg_read(dev, MAX17205_AD_STATUS, &status);
+        if (rc) {
+            LOG_ERR("Failed to read status after hardware reset: %d", rc);
+            return rc;
+        }
+        k_sleep(K_MSEC(1));
+        check_count++;
+    } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
+
+    if (!(status & MAX17205_STATUS_POR)) {
+        LOG_ERR("POR bit is not yet set. Timing out.");
+        return -ETIMEDOUT;
+    }
+
+    rc = max17205_reg_write(dev, MAX17205_AD_STATUS, 0);
+    if (rc) {
+        LOG_ERR("Unable to clear POR status bit: %d", rc);
+    }
+
+    rc = max17205_firmware_reset(dev);
+    if (rc) {
+        LOG_ERR("Failed to perform firmware reset: %d", rc);
+        return rc;
+    }
+
+    // Not sure this polling loop is needed; datasheet only mentions waiting tPOR.
+    check_count = 0;
+    status = 0;
+    do {
+        rc = max17205_reg_read(dev, MAX17205_AD_STATUS, &status);
+        if (rc) {
+            LOG_ERR("Failed to read status after firmware reset: %d", rc);
+            return rc;
+        }
+        k_sleep(K_MSEC(1));
+        check_count++;
+    } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
+
+    if (!(status & MAX17205_STATUS_POR)) {
+        LOG_ERR("POR bit is not yet set. Timing out.");
+        return -ETIMEDOUT;
+    }
+
     return 0;
 }
 
@@ -326,7 +474,7 @@ static void max17205ReadNVWriteCountMaskingRegister(uint16_t *reg_dest, uint8_t 
  * @return -ENOTSUP for unsupported channels
  */
 static int max17205_channel_get(const struct device *dev, enum sensor_channel chan,
-                struct sensor_value *valp)
+                                struct sensor_value *valp)
 {
     const struct max17205_config *const config = dev->config;
     struct max17205_data *const data = dev->data;
@@ -605,101 +753,6 @@ static int max17205_sample_fetch(const struct device *dev, enum sensor_channel c
     return 0;
 }
 
-/**
- * @brief   Firmware reset the chip. Allows it to utilize any
- *          changes written to the shadow RAM register.
- *
- * @param[in] devp      pointer to the @p MAX17205Driver object
- *
- * @api
- */
-int max17205_firmware_reset(const struct device *dev) {
-
-    int rc;
-
-    LOG_DBG("Performing MAX17205 firmware reset");
-    // Now firmware-reset the chip so it will use the values written to various registers
-    rc = max17205_reg_write(dev, MAX17205_AD_CONFIG2, MAX17205_CONFIG2_POR_CMD);
-    k_sleep(K_MSEC(MAX17205_T_POR_MS));
-
-    return rc;
-}
-
-/**
- * @brief   Hardware reset the chip. Reloads nonvolatile
- *          registers into shadow RAM.
- *
- * @param[in] devp      pointer to the @p MAX17205Driver object
- *
- * @api
- */
-int max17205_hardware_reset(const struct device *dev) {
-    int rc;
-
-    rc = max17205_reg_write(dev, MAX17205_AD_STATUS, 0);
-    if (rc) {
-        LOG_ERR("Unable to clear POR status bit: %d", rc);
-    }
-
-    LOG_DBG("Performing MAX17205 hardware reset");
-    rc = max17205_reg_write(dev, MAX17205_AD_COMMAND, MAX17205_COMMAND_HARDWARE_RESET);
-    if (rc) {
-        LOG_ERR("Failed to write hardware reset command: %d", rc);
-        return rc;
-    }
-
-    k_sleep(K_MSEC(MAX17205_T_POR_MS));
-
-    // Not sure this polling loop is needed; datasheet only mentions waiting tPOR.
-    uint32_t check_count = 0;
-    uint16_t status = 0;
-    do {
-        rc = max17205_reg_read(dev, MAX17205_AD_STATUS, &status);
-        if (rc) {
-            LOG_ERR("Failed to read status after hardware reset: %d", rc);
-            return rc;
-        }
-        k_sleep(K_MSEC(1));
-        check_count++;
-    } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
-
-    if (!(status & MAX17205_STATUS_POR)) {
-        LOG_ERR("POR bit is not yet set. Timing out.");
-        return -ETIMEDOUT;
-    }
-
-    rc = max17205_reg_write(dev, MAX17205_AD_STATUS, 0);
-    if (rc) {
-        LOG_ERR("Unable to clear POR status bit: %d", rc);
-    }
-
-    rc = max17205_firmware_reset(dev);
-    if (rc) {
-        LOG_ERR("Failed to perform firmware reset: %d", rc);
-        return rc;
-    }
-
-    // Not sure this polling loop is needed; datasheet only mentions waiting tPOR.
-    check_count = 0;
-    status = 0;
-    do {
-        rc = max17205_reg_read(dev, MAX17205_AD_STATUS, &status);
-        if (rc) {
-            LOG_ERR("Failed to read status after firmware reset: %d", rc);
-            return rc;
-        }
-        k_sleep(K_MSEC(1));
-        check_count++;
-    } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
-
-    if (!(status & MAX17205_STATUS_POR)) {
-        LOG_ERR("POR bit is not yet set. Timing out.");
-        return -ETIMEDOUT;
-    }
-
-    return 0;
-}
-
 static int wait_for_data_ready(const struct device *dev)
 {
     int rc;
@@ -726,6 +779,8 @@ static int max17205_attr_set(const struct device *dev,
                              enum sensor_attribute attr,
                              const struct sensor_value *val)
 {
+    struct max17205_config *config = (struct max17205_config *)dev->config;
+    int16_t raw;
     int rc = 0;
 
     switch (attr) {
@@ -736,10 +791,38 @@ static int max17205_attr_set(const struct device *dev,
         rc = max17205_firmware_reset(dev);
         break;
     case MAX17205_ATTR_CAPACITY:
+        {
+            uint16_t reg_addr;
+
+            raw = encode_capacity(config->rsense_mohms, val->val1);
+
+            switch (chan) {
+            case SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY:
+                reg_addr = MAX17205_AD_FULLCAPREP;
+                break;
+            case SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY:
+                reg_addr = MAX17205_AD_AVCAP;
+                break;
+            case MAX17205_CHAN_MIX_CAPACITY:
+                reg_addr = MAX17205_AD_MIXCAP;
+                break;
+            case SENSOR_CHAN_GAUGE_NOM_AVAIL_CAPACITY:
+                reg_addr = MAX17205_AD_REPCAP;
+                break;
+            default:
+                rc = -EINVAL;
+            }
+            if (!rc) {
+                rc = max17205_reg_write(dev, reg_addr, raw);
+            }
+        }
         break;
     case MAX17205_ATTR_LEARN_STAGE:
+        raw = encode_learn_state(val->val1);
+        rc = max17205_reg_write(dev, MAX17205_AD_NLEARNCFG, raw);
         break;
     case MAX17205_ATTR_NV_BLOCK_PROGRAM:
+        rc = max17205_nv_program(dev);
         break;
     default:
         if ((unsigned int)attr >= MAX17205_ATTR_REGS) {
@@ -788,7 +871,8 @@ static int max17205_attr_get(const struct device *dev,
         }
         break;
     case MAX17205_ATTR_NV_WRITES_LEFT:
-        rc = max17205_
+        rc = max17205_read_writes_remaining(dev, &val->val1);
+        val->val2 = 0;
         break;
     default:
         if ((unsigned int)attr >= MAX17205_ATTR_REGS) {
