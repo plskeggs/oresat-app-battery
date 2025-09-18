@@ -8,6 +8,9 @@ execute_process(COMMAND bash -c "oresat-configs canopennode od.yaml ../../common
 
 target_sources(app PRIVATE
   src/main.c
+  src/batt.c
+  src/calib.c
+  src/hist.c
   gen/OD.c
 )
 

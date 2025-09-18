@@ -293,7 +293,7 @@ static int max17205_read_writes_remaining(const struct device *dev, uint32_t *nu
         return rc;
     }
 
-    k_sleep(K_MSEC(MAX17205_T_RECAL_MS));
+    k_msleep(MAX17205_T_RECAL_MS);
 
     rc = max17205_reg_read(dev, 0x1ED, &buf);
     if (rc) {
@@ -339,7 +339,7 @@ static int max17205_nv_program(const struct device *dev) {
     //  4. Wait t BLOCK for the copy to complete.
     LOG_DBG("Waiting %u ms for block copy to complete....", MAX17205_T_BLOCK_MS);
     // tBlock(max) is specified as 7360ms in the data sheet, page 16
-    k_sleep(K_MSEC(MAX17205_T_BLOCK_MS));
+    k_msleep(MAX17205_T_BLOCK_MS);
 
     //  5. Check the CommStat.NVError bit. If set, repeat the process. If clear, continue.
     rc = max17205_reg_read(dev, MAX17205_AD_COMMSTAT, &buf);
@@ -384,7 +384,7 @@ int max17205_firmware_reset(const struct device *dev) {
     LOG_DBG("Performing MAX17205 firmware reset");
     // Now firmware-reset the chip so it will use the values written to various registers
     rc = max17205_reg_write(dev, MAX17205_AD_CONFIG2, MAX17205_CONFIG2_POR_CMD);
-    k_sleep(K_MSEC(MAX17205_T_POR_MS));
+    k_msleep(MAX17205_T_POR_MS);
 
     return rc;
 }
@@ -412,7 +412,7 @@ int max17205_hardware_reset(const struct device *dev) {
         return rc;
     }
 
-    k_sleep(K_MSEC(MAX17205_T_POR_MS));
+    k_msleep(MAX17205_T_POR_MS);
 
     // Not sure this polling loop is needed; datasheet only mentions waiting tPOR.
     uint32_t check_count = 0;
@@ -423,7 +423,7 @@ int max17205_hardware_reset(const struct device *dev) {
             LOG_ERR("Failed to read status after hardware reset: %d", rc);
             return rc;
         }
-        k_sleep(K_MSEC(1));
+        k_msleep(1);
         check_count++;
     } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
 
@@ -452,7 +452,7 @@ int max17205_hardware_reset(const struct device *dev) {
             LOG_ERR("Failed to read status after firmware reset: %d", rc);
             return rc;
         }
-        k_sleep(K_MSEC(1));
+        k_msleep(1);
         check_count++;
     } while (!(status & MAX17205_STATUS_POR) && check_count < 20); /* While still resetting */
 
@@ -655,12 +655,20 @@ static int max17205_sample_fetch(const struct device *dev, enum sensor_channel c
         dest = &data->temp_min_C;
         break;
     case MAX17205_CHAN_V_CELL_1:
-        reg_addr = MAX17205_AD_CELL1;
+        reg_addr = MAX17205_AD_AVGCELL1;
+        dest = &data->v_cell_1;
         break;
     case MAX17205_CHAN_V_CELL_2:
-        reg_addr = MAX17205_AD_BATT; // post processing uses batt and cell1 to compute cell2
-        dest = &data->v_cell_2;
-        break;
+        {
+            rc = max17205_reg_read(dev, MAX17205_AD_BATT, &data->v_batt);
+            if (!rc) {
+                rc = max17205_reg_read(dev, MAX17205_AD_AVGCELL1, &data->v_cell_1);
+                if (!rc) {
+                    data->v_cell_2 = data->v_batt - data->v_cell_1;
+                }
+            }
+            return rc;
+        }
     case MAX17205_CHAN_V_CELL_AVG:
         reg_addr = MAX17205_AD_AVGVCELL;
         dest = &data->v_cell_avg;
@@ -670,7 +678,7 @@ static int max17205_sample_fetch(const struct device *dev, enum sensor_channel c
         dest = &data->v_cell;
         break;
     case SENSOR_CHAN_GAUGE_VOLTAGE:
-        reg_addr = MAX17205_AD_BATT; // post processing uses batt and cell1 to compute cell2
+        reg_addr = MAX17205_AD_BATT;
         dest = &data->v_batt;
         break;
     case MAX17205_CHAN_V_CELL_MAX:
@@ -765,7 +773,7 @@ static int wait_for_data_ready(const struct device *dev)
 
     /* Do not continue until FSTAT.DNR bit is cleared */
     while (tmp & MAX17205_FSTAT_DNR) {
-        k_sleep(K_MSEC(10));
+        k_msleep(10);
         rc = max17205_reg_read(dev, MAX17205_AD_FSTAT, &tmp);
         if (rc) {
             return rc;
@@ -909,7 +917,7 @@ static int max17205_init(const struct device *dev)
     int16_t tmp;
     int rc;
 
-    k_sleep(K_MSEC(MAX17205_T_POR_MS));
+    k_msleep(MAX17205_T_POR_MS);
 
     if (!device_is_ready(config->i2c.bus)) {
         LOG_ERR("Bus device is not ready");
