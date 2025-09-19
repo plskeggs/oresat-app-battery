@@ -1,10 +1,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
 
+#include "calib.h"
+#include "batt.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(max17205, CONFIG_SENSOR_LOG_LEVEL);
-
-#include "calib.h"
 
 int max17205_reg_read(const struct device *dev, uint16_t addr, int16_t *val)
 {
@@ -27,17 +28,17 @@ int max17205_reg_write(const struct device *dev, uint16_t addr, int16_t val)
     return rc;
 }
 
-int max17205_firmware_reset(const struct device *dev)
+static int max17205_firmware_reset(const struct device *dev)
 {
     return sensor_attr_set(dev, 0, MAX17205_ATTR_FW_RESET, NULL);
 }
 
-int max17205_hardware_reset(const struct device *dev)
+static int max17205_hardware_reset(const struct device *dev)
 {
     return sensor_attr_set(dev, 0, MAX17205_ATTR_HW_RESET, NULL);
 }
 
-int max17205_read_writes_remaining(const struct device *dev, uint8_t *num_left)
+static int max17205_read_writes_remaining(const struct device *dev, uint8_t *num_left)
 {
     struct sensor_value sensor_val;
     int rc;
@@ -49,12 +50,12 @@ int max17205_read_writes_remaining(const struct device *dev, uint8_t *num_left)
     return rc;
 }
 
-int max17205_nv_program(const struct device *dev)
+static int max17205_nv_program(const struct device *dev)
 {
     return sensor_attr_set(dev, 0, MAX17205_ATTR_NV_BLOCK_PROGRAM, NULL);
 }
 
-int max17205_read_learn_stage(const struct device *dev, uint16_t *stage)
+static int max17205_read_learn_stage(const struct device *dev, uint16_t *stage)
 {
     struct sensor_value sensor_val;
     int rc;
@@ -66,21 +67,24 @@ int max17205_read_learn_stage(const struct device *dev, uint16_t *stage)
     return rc;
 }
 
-int max17205_write_learn_stage(const struct device *dev, uint16_t stage)
+static int max17205_write_learn_stage(const struct device *dev, uint16_t stage)
 {
     struct sensor_value sensor_val = {.val1 = stage, .val2 = 0};
 
     return sensor_attr_set(dev, 0, MAX17205_ATTR_LEARN_STAGE, &sensor_val);
 }
 
+#if 0
+/* alternate way to read a capacity -- other is directly with chan as defined in calib.h */
 int max17205_read_capacity(const struct device *dev, enum sensor_channel chan, uint32_t *cap)
 {
     struct sensor_value sensor_val;
 
     return sensor_attr_get(dev, 0, MAX17205_ATTR_CAPACITY, &sensor_val);
 }
+#endif
 
-int max17205_write_capacity(const struct device *dev, enum sensor_channel chan, uint32_t cap)
+static int max17205_write_capacity(const struct device *dev, enum sensor_channel chan, uint32_t cap)
 {
     struct sensor_value sensor_val = {.val1 = cap, .val2 = 0};
 
@@ -129,7 +133,7 @@ int read_channel_int32_t(const struct device *dev, enum sensor_channel type, int
     return rc;
 }
 
-int max17205_validate_registers(const struct device *dev, const max17205_regval_t * list, size_t len, bool * valid)
+static int max17205_validate_registers(const struct device *dev, const max17205_regval_t * list, size_t len, bool * valid)
 {
     bool matches = true;
     LOG_DBG("Current and expected NV settings:");
@@ -152,7 +156,7 @@ int max17205_validate_registers(const struct device *dev, const max17205_regval_
     return 0;
 }
 
-int max17205_write_registers(const struct device *dev, const max17205_regval_t * list, size_t len)
+static int max17205_write_registers(const struct device *dev, const max17205_regval_t * list, size_t len)
 {
     for (size_t i = 0; i < len; ++i) {
         int rc = max17205_reg_write(dev, list[i].reg, list[i].value);
@@ -494,7 +498,7 @@ bool nv_ram_write(const struct device *dev, const char *pack_str)
  * Returns true if NV was written, false otherwise.
  */
 #if ENABLE_NV_WRITE_PROMPT
-bool prompt_nv_write(const struct device *dev, const char *pack_str)
+static bool prompt_nv_write(const struct device *dev, const char *pack_str)
 {
     LOG_DBG("Write NV RAM to NV%s", pack_str);
 
@@ -534,7 +538,7 @@ bool prompt_nv_write(const struct device *dev, const char *pack_str)
 //If state of charge is known to be full, set LS bits D6-D0 of LearnCfg register to 0b111
 //and write MixCap and RepCap registers to 2600.
 #if ENABLE_LEARN_COMPLETE && DEBUG_PRINT
-bool update_learning_complete(const struct device *dev, pack_t *pack)
+static bool update_learning_complete(const struct device *dev, pack_t *pack)
 {
     batt_pack_data_t *pack_data = &pack->data;
     bool ret = false;
@@ -546,7 +550,7 @@ bool update_learning_complete(const struct device *dev, pack_t *pack)
 
         LOG_DBG("Pack %d seems full", pack->pack_number);
         uint16_t state;
-        int rc = max17205_read_learn_state(dev, &state);
+        int rc = max17205_read_learn_stage(dev, &state);
 
         if (rc) {
             LOG_DBG("Error reading learn state");
@@ -556,12 +560,12 @@ bool update_learning_complete(const struct device *dev, pack_t *pack)
         if (state == MAX17205_LEARN_COMPLETE) {
             LOG_DBG("Learning is already complete.");
         } else {
-            rc = max17205_write_learn_state(dev, MAX17205_LEARN_COMPLETE);
+            rc = max17205_write_learn_stage(dev, MAX17205_LEARN_COMPLETE);
             if (rc) {
                 LOG_DBG("Error writing learn state");
                 return ret;
             }
-            rc = max17205_read_learn_state(dev, &state);
+            rc = max17205_read_learn_stage(dev, &state);
             if (rc) {
                 LOG_DBG("Error checking learn state");
                 return ret;
@@ -594,21 +598,23 @@ void manage_calibration(void)
 #if ENABLE_NV_WRITE_PROMPT
     bool nv_written = false;
 #endif
+    pack_t *pack;
 
     for (i = 0; i < NPACKS; i++) {
-        LOG_DBG("%s:", packs[i].name);
-        max17205_print_volatile_memory(&packs[i].drvr);
+        pack = get_pack(i);
+        LOG_DBG("%s:", pack->name);
+        max17205_print_volatile_memory(pack->dev);
 
 #if ENABLE_LEARN_COMPLETE
         // If ENABLE_LEARN_COMPLETE=1, ENABLE_NV_MEMORY_UPDATE_CODE=1 and DEBUG_PRINT are all enabled, we will only prompt to update
         // NV when learning is complete. If ENABLE_LEARN_COMPLETE is not 1 but the others are, then we will only prompt to update
         // NV if there is a change to NV RAM required (done prior to the main loop).
-        packs[i].updated = update_learning_complete(&packs[i].drvr, &packs[i]);
+        pack->updated = update_learning_complete(pack->dev, pack);
 #endif
 #if ENABLE_NV_WRITE_PROMPT
-        if (packs[i].init && packs[i].updated) {
-            nv_written |= prompt_nv_write(&packs[i].drvr, packs[i].name);
-            packs[i].updated = false;
+        if (pack->init && pack->updated) {
+            nv_written |= prompt_nv_write(pack->dev, pack->name);
+            pack->updated = false;
         }
 #endif
     }

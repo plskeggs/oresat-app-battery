@@ -984,6 +984,11 @@ static int max17205_init(const struct device *dev)
         return rc;
     }
 
+    rc = max17205_reg_write(dev, MAX17205_AD_CONFIG, config->config);
+    if (rc) {
+        return rc;
+    }
+
     rc = max17205_firmware_reset(dev);
     if (rc) {
         return rc;
@@ -1009,6 +1014,7 @@ static DEVICE_API(sensor, max17205_battery_driver_api) = {
         .num_cells = DT_INST_PROP(n, num_cells),
         .cel_bal_thresh_voltage = DT_INST_PROP(n, cel_bal_thresh_voltage),
         .rsense_mohms = DT_INST_PROP(n, rsense_mohms),
+        .config = DT_INST_PROP(n, config)
     };                                                                                         \
                                                                                                    \
     SENSOR_DEVICE_DT_INST_DEFINE(n, &max17205_init, NULL, &max17205_data_##n,            \

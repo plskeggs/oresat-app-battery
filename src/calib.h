@@ -7,10 +7,6 @@ extern "C" {
 
 int max17205_reg_read(const struct device *dev, uint16_t addr, int16_t *val);
 int max17205_reg_write(const struct device *dev, uint16_t addr, int16_t val);
-int max17205_read_writes_remaining(const struct device *dev, uint8_t *num_left);
-
-int max17205_validate_registers(const struct device *dev, const max17205_regval_t *list, size_t len, bool *valid);
-int max17205_write_registers(const struct device *dev, const max17205_regval_t *list, size_t len);
 
 int max17205_print_volatile_memory(const struct device *dev);
 int max17205_print_nonvolatile_memory(const struct device *dev);
@@ -18,8 +14,6 @@ int max17205_print_nonvolatile_memory(const struct device *dev);
 int max17205_read_history(const struct device *dev);
 
 bool nv_ram_write(MAX17205Driver *devp, const char *pack_str);
-bool prompt_nv_write(MAX17205Driver *devp, const char *pack_str);
-bool update_learning_complete(MAX17205Driver *devp, pack_t *pack);
 void manage_calibration(void);
 
 const char* max17205_reg_to_str(const uint16_t reg);

@@ -1,10 +1,15 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
 
+#include "hist.h"
+#include "batt.h"
+#include "calib.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(max17205, CONFIG_SENSOR_LOG_LEVEL);
 
-#include "hist.h"
+TODO:
+- port flash access to one of the Zephyr flash subsystems
 
 // raw register values to store at runtime per pack;
 // restoring after a reset should result in accurate
@@ -16,7 +21,7 @@ typedef struct __attribute__((packed)) runtime_pack_data {
 
 // entry to append to already-written flash at next update interval
 typedef struct __attribute__((packed)) runtime_battery_data {
-    runtime_pack_data_t packs[NPACKS];
+    runtime_pack_data_t rt_packs[NPACKS];
     uint16_t rst_cycle;         // number of reset cycles so far
     uint16_t minute : 12;       // number of minutes so far during a cycle
     uint16_t unused : 3;        // must be 0
@@ -44,7 +49,7 @@ static void print_runtime_entry(runtime_battery_data_t *data, unsigned int start
             prefix ? prefix : "",
             data->rst_cycle, data->minute, data->unused, data->estimated, data->crc);
     for (unsigned int j = start; j < start + count; j++) {
-        LOG_DBG("   pack %u: mixcap:0x%04X, repcap:0x%04X", j + 1, data->packs[j].mixcap, data->packs[j].repcap);
+        LOG_DBG("   pack %u: mixcap:0x%04X, repcap:0x%04X", j + 1, data->rt_packs[j].mixcap, data->rt_packs[j].repcap);
     }
 }
 
@@ -105,6 +110,24 @@ void find_last_batt_hist(void)
     }
 }
 
+static void utilize_batt_hist(pack_t *pack, runtime_battery_data_t *dest)
+{
+    unsigned int i = pack->pack_number - 1;
+    uint16_t tmp;
+    int rc;
+
+    tmp = MIN(dest->rt_packs[i].mixcap, CELL_CAPACITY_MAH_RAW);
+    rc = max17205_reg_write(pack->dev, MAX17205_AD_MIXCAP, tmp);
+    if (rc) {
+        LOG_DBG("Error writing AD_MIXCAP");
+    }
+    tmp = MIN(dest->rt_packs[i].repcap, CELL_CAPACITY_MAH_RAW);
+    rc = max17205_reg_write(pack->dev, MAX17205_AD_REPCAP, tmp);
+    if (rc) {
+        LOG_DBG("Error writing AD_REPCAP");
+    }
+}
+
 void load_latest_batt_hist(pack_t *pack)
 {
     if (last_valid_history_entry == NULL) {
@@ -112,24 +135,36 @@ void load_latest_batt_hist(pack_t *pack)
         return;
     }
 
-    msg_t r;
-    uint16_t tmp;
-
     LOG_DBG("Loading entry to pack %u:", pack->pack_number);
-    print_runtime_entry(last_valid_history_entry, pack->pack_number - 1, 1, NULL);
-    tmp = MIN(last_valid_history_entry->packs[pack->pack_number - 1].mixcap, CELL_CAPACITY_MAH_RAW);
-    r = max17205Write(&pack->drvr, MAX17205_AD_MIXCAP, tmp);
-    if (r != MSG_OK) {
-        LOG_DBG("Error writing AD_MIXCAP");
+    print_runtime_entry(dest, pack->pack_number - 1, 1, NULL);
+
+    utilize_batt_hist(pack, last_valid_history_entry);
+}
+
+static void create_batt_hist(pack_t *pack, runtime_battery_data_t *dest)
+{
+    unsigned int i = pack->pack_number - 1;
+    uint16_t tmp;
+    int rc;
+
+    rc = max17205_reg_read(pack->dev, MAX17205_AD_MIXCAP, &tmp);
+    if (rc) {
+        dest->rt_packs[i].mixcap = 0;
+    } else {
+        // clamp to design limit to handle case where full pack is in storage,
+        // self discharges, then is charged later -- MAX17205 will then make max cap
+        // higher than it should be
+        dest->rt_packs[i].mixcap = MIN(tmp, CELL_CAPACITY_MAH_RAW);
     }
-    tmp = MIN(last_valid_history_entry->packs[pack->pack_number - 1].repcap, CELL_CAPACITY_MAH_RAW);
-    r = max17205Write(&pack->drvr, MAX17205_AD_REPCAP, tmp);
-    if (r != MSG_OK) {
-        LOG_DBG("Error writing AD_REPCAP");
+    rc = max17205_reg_read(pack->dev, MAX17205_AD_REPCAP, &tmp);
+    if (rc) {
+        dest->rt_packs[i].repcap = 0;
+    } else {
+        dest->rt_packs[i].repcap = MIN(tmp, CELL_CAPACITY_MAH_RAW);
     }
 }
 
-bool add_next_batt_hist(runtime_battery_data_t *new_data)
+static bool add_next_batt_hist(runtime_battery_data_t *new_data)
 {
     if (last_empty_history_entry < &battery_history[NUM_BATT_HIST_ENTRIES]) {
         if (flashWriteF091((flashaddr_t)last_empty_history_entry, (uint8_t *)new_data, sizeof(runtime_battery_data_t)) == FLASH_RETURN_SUCCESS) {
@@ -168,21 +203,7 @@ bool store_current_batt_hist(void)
     }
 #endif // HIST_STORE_PROMPT
     for (i = 0; i < NPACKS; i++) {
-        r = max17205Read(&packs[i].drvr, MAX17205_AD_MIXCAP, &tmp);
-        if (r != MSG_OK) {
-            new_data.packs[i].mixcap = 0;
-        } else {
-            // clamp to design limit to handle case where full pack is in storage,
-            // self discharges, then is charged later -- MAX17205 will then make max cap
-            // higher than it should be
-            new_data.packs[i].mixcap = MIN(tmp, CELL_CAPACITY_MAH_RAW);
-        }
-        r = max17205Read(&packs[i].drvr, MAX17205_AD_REPCAP, &tmp);
-        if (r != MSG_OK) {
-            new_data.packs[i].repcap = 0;
-        } else {
-            new_data.packs[i].repcap = MIN(tmp, CELL_CAPACITY_MAH_RAW);
-        }
+        create_batt_hist(get_pack(i), &new_data);
     }
     new_data.rst_cycle = reset_cycle_count;
     new_data.minute = TIME_I2S(chVTGetSystemTime()) / 60;
