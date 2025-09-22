@@ -10,6 +10,7 @@ LOG_MODULE_REGISTER(max17205, CONFIG_SENSOR_LOG_LEVEL);
 
 TODO:
 - port flash access to one of the Zephyr flash subsystems
+- use Kconfigs in place of various configuration macros (DEBUG_PRINT, VERBOSE_DEBUG, HIST_STORE_PROMPT, etc.)
 
 // raw register values to store at runtime per pack;
 // restoring after a reset should result in accurate

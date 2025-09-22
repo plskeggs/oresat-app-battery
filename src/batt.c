@@ -20,8 +20,12 @@
 #include <string.h>
 
 TODO:
-- provide access to drivers from batt.c's packs array in batt.h
-- replace #defines that affect build below with Kconfigs
+- replace #defines that affect build below with Kconfigs:
+   DEBUG_PRINT, VERBOSE_DEBUG, ENABLE_NV_MEMORY_UPDATE_CODE, ENABLE_LEARN_COMPLETE, ENABLE_HEATERS,
+   ENABLE_CHARGING_CONTROL, HIST_STORE_PROMPT
+- re-review writes to N-version of registers vs. non-N
+- do we need to still deal with PACKCFG here? done in the driver now
+- rewrite code that uses GPIOs (for heaters, charge/discharge status / control, and LED)
 
 LOG_MODULE_DECLARE(app_battery, LOG_LEVEL_DBG);
 
@@ -96,8 +100,11 @@ LOG_MODULE_DECLARE(app_battery, LOG_LEVEL_DBG);
 // Voltage below which we should stop everything until charging starts
 #define SHUTDOWN_MV 2850
 
+// Subtask periods
+#define CALIB_INTERVAL_MS 120000 // 2 minutes
 #define RUNTIME_BATT_STORE_INTERVAL_MS 300000U // 5 minutes
-#define LED_TOGGLE_INTERVAL_MS 500
+#define LED_TOGGLE_INTERVAL_MS 500 // 0.5 seconds
+#define BATT_TASK_SLEEP_INTERVAL_MS 10
 
 typedef enum {
     BATTERY_OD_ERROR_INFO_CODE_NONE = 0,
@@ -208,17 +215,17 @@ pack_t *get_pack(unsigned int pack)
     }
 }
 
-void palSetLine(int line)
+static void palSetLine(int line)
 {
     // TODO: replace with GPIO stuff
 }
 
-void palClearLine(int line)
+static void palClearLine(int line)
 {
     // TODO: replace with GPIO stuff
 }
 
-void palToggleLine(int line)
+static void palToggleLine(int line)
 {
     // TODO: replace with GPIO stuff
 }
@@ -651,9 +658,15 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
     int64_t ms = 0;
     int64_t next_hist_update_ms = RUNTIME_BATT_STORE_INTERVAL_MS + k_uptime_get();
     int64_t next_led_update_ms = LED_TOGGLE_INTERVAL_MS + k_uptime_get();
+    int64_t next_calib_update_ms = CALIB_INTERVAL_MS + k_uptime_get();
 
     for (;;) {
         ms = k_uptime_get();
+
+        if (ms >= next_calib_update_ms) {
+            next_calib_update_ms = ms + CALIB_INTERVAL_MS;
+            manage_calibration();
+        }
 
         if (ms >= next_hist_update_ms) {
             next_hist_update_ms = ms + RUNTIME_BATT_STORE_INTERVAL_MS;
@@ -669,7 +682,7 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
             }
             // else falls through
         } else {
-            k_msleep(10);
+            k_msleep(BATT_TASK_SLEEP_INTERVAL_MS);
             continue;
         }
 
@@ -695,10 +708,6 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
 
         for (i = 0; i < NPACKS; i++) {
             update_battery_charging_state(&packs[i]);
-        }
-
-        if ((loop % 240) == 1) {
-            manage_calibration();
         }
     }
 }

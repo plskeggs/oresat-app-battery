@@ -1,10 +1,13 @@
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/drivers/sensor.h>
 
 #include "calib.h"
 #include "batt.h"
 
-#include <zephyr/logging/log.h>
+TODO:
+- replace DEBUG_PRINT, ENABLE_NV_WRITE_PROMPT, ENABLE_LEARN_COMPLETE with Kconfigs
+
 LOG_MODULE_REGISTER(max17205, CONFIG_SENSOR_LOG_LEVEL);
 
 int max17205_reg_read(const struct device *dev, uint16_t addr, int16_t *val)
@@ -22,10 +25,8 @@ int max17205_reg_read(const struct device *dev, uint16_t addr, int16_t *val)
 int max17205_reg_write(const struct device *dev, uint16_t addr, int16_t val)
 {
     struct sensor_value sensor_val = {.val1 = (uint16_t)val, .val2 = 0};
-    int rc;
 
-    rc = sensor_attr_set(dev, 0, MAX17205_ATTR_REGS + addr, &sensor_val);
-    return rc;
+    return sensor_attr_set(dev, 0, MAX17205_ATTR_REGS + addr, &sensor_val);
 }
 
 static int max17205_firmware_reset(const struct device *dev)
@@ -631,6 +632,7 @@ void manage_calibration(void)
 #endif
 }
 
+// TODO: replace with X macros-generated table / fn
 const char* max17205_reg_to_str(const uint16_t reg) {
     switch (reg) {
         case MAX17205_AD_AVGCELL1:
