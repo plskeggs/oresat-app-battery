@@ -11,41 +11,60 @@
 LOG_MODULE_REGISTER(app_battery, LOG_LEVEL_DBG);
 
 #define CAN_INTERFACE (DEVICE_DT_GET(DT_CHOSEN(zephyr_canbus)))
-#define CAN_BITRATE                                                                        \
-    (DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bitrate,                                         \
-     DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bus_speed, CONFIG_CAN_DEFAULT_BITRATE)         / \
-     1000))
+#define CAN_BITRATE									   \
+	(DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bitrate, 					   \
+	DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bus_speed, CONFIG_CAN_DEFAULT_BITRATE) / 1000))
 
 #define BATT_THREAD_STACK_SIZE 512
 #define BATT_THREAD_PRIORITY 0
+
+//TODO timing for i2c2 is different the i2c1. Scope the lines and match them up.
+/* ---- ChibiOS definition -- port this ---- */
+static const I2CConfig i2cconfig_1 = {
+	STM32_TIMINGR_PRESC(0xBU) |
+	STM32_TIMINGR_SCLDEL(0x4U) | STM32_TIMINGR_SDADEL(0x2U) |
+	STM32_TIMINGR_SCLH(0xFU)  | STM32_TIMINGR_SCLL(0x13U),
+	0,
+	0
+};
+*/
+/* ---- ChibiOS definition -- port this ---- */
+static const I2CConfig i2cconfig_2 = {
+	STM32_TIMINGR_PRESC(0xFU) |
+	STM32_TIMINGR_SCLDEL(0x4U) | STM32_TIMINGR_SDADEL(0x2U) |
+	STM32_TIMINGR_SCLH(0xFU)  | STM32_TIMINGR_SCLL(0x13U),
+	0,
+	0
+};
+*/
 
 int main(void)
 {
 	uint8_t node_id = oresat_get_node_id();
 
-    LOG_INF("Oresat app battery starting up on board: %s, node: %u", CONFIG_BOARD_TARGET, (unsigned int)node_id);
+	LOG_INF("Oresat app battery starting up on board: %s, node: %u", CONFIG_BOARD_TARGET, (unsigned int)node_id);
 
 	oresat_fix_pdo_cob_ids(node_id);
 
-    LOG_DBG("Opening CAN");
+	LOG_DBG("Opening CAN");
 	canopennode_init(CAN_INTERFACE, CAN_BITRATE, node_id);
-    LOG_DBG("Initializing sensors");
+	LOG_DBG("Initializing sensors");
 	board_sensors_init();
 
-    K_THREAD_STACK_DEFINE(batt_stack, BATT_THREAD_STACK_SIZE);
-    struct k_thread batt_thread_data;
+	K_THREAD_STACK_DEFINE(batt_stack, BATT_THREAD_STACK_SIZE);
+	struct k_thread batt_thread_data;
 
-    k_tid_t batt_thread = k_thread_create(&batt_thread_data, batt_stack, K_THREAD_STACK_SIZEOF(batt_stack),
-                                          batt_thread_handler, NULL, NULL, NULL,
-                                          BATT_THREAD_PRIORITY, 0, K_NO_WAIT);
+	k_tid_t batt_thread = k_thread_create(&batt_thread_data, batt_stack, K_THREAD_STACK_SIZEOF(batt_stack),
+					batt_thread_handler, NULL, NULL, NULL,
+					BATT_THREAD_PRIORITY, 0, K_NO_WAIT);
 
-    // the battery thread is now running; wait until it exits, if ever, then clean up
-    k_thread_join(batt_thread, K_FOREVER);
-    k_thread_stack_free(batt_stack);
+// the battery thread is now running; wait until it exits, if ever, then clean up
+	k_thread_join(batt_thread, K_FOREVER);
+	k_thread_stack_free(batt_stack);
 
 	canopennode_stop(CAN_INTERFACE);
 	sys_reboot(SYS_REBOOT_COLD);
-    LOG_INF("Done.");
+	LOG_INF("Done.");
 
 	return 0;
 }
