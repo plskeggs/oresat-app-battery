@@ -2,6 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/console/console.h>
+#include <zephyr/drivers/gpio.h>
 #include <canopennode.h>
 #include <OD.h>
 #include <oresat.h>
@@ -25,7 +26,7 @@ TODO:
    ENABLE_CHARGING_CONTROL, HIST_STORE_PROMPT
 - re-review writes to N-version of registers vs. non-N
 - do we need to still deal with PACKCFG here? done in the driver now
-- rewrite code that uses GPIOs (for heaters, charge/discharge status / control, and LED)
+- port common/lib/util/oresat.h to Zephyr
 
 LOG_MODULE_DECLARE(app_battery, LOG_LEVEL_DBG);
 
@@ -187,24 +188,62 @@ static battery_heating_state_machine_state_t current_battery_state_machine_state
 // All packs defined here, including non-zero initial data.
 static pack_t packs[NPACKS] = {
     {
-     .heater_on = LINE_HEATER_ON_1,
-     .line_dchg_dis = LINE_DCHG_DIS_PK1,
-     .line_chg_dis = LINE_CHG_DIS_PK1,
-     .line_dchg_stat = LINE_DCHG_STAT_PK1,
-     .line_chg_stat = LINE_CHG_STAT_PK1,
+     .heater_on = GPIO_DT_SPEC_GET_BY_IDX(packs, heater_gpios, 0),
+     .line_dchg_dis = GPIO_DT_SPEC_GET_BY_IDX(packs, discharge_disable_gpios, 0),
+     .line_chg_dis = GPIO_DT_SPEC_GET_BY_IDX(packs, charge_disable_gpios, 0),
+     .line_dchg_stat = GPIO_DT_SPEC_GET_BY_IDX(packs, discharge_stat_oc_gpios, 0),
+     .line_chg_stat = GPIO_DT_SPEC_GET_BY_IDX(packs, charge_stat_oc_gpios, 0),
+     .line_alert = GPIO_DT_SPEC_GET_BY_IDX(packs, alert_gpios, 0),
      .pack_number = 1,
      .name = "Pack 1"
     },
     {
-     .heater_on = LINE_HEATER_ON_2,
-     .line_dchg_dis = LINE_DCHG_DIS_PK2,
-     .line_chg_dis = LINE_CHG_DIS_PK2,
-     .line_dchg_stat = LINE_DCHG_STAT_PK2,
-     .line_chg_stat = LINE_CHG_STAT_PK2,
+     .heater_on = GPIO_DT_SPEC_GET_BY_IDX(packs, heater_gpios, 1),
+     .line_dchg_dis = GPIO_DT_SPEC_GET_BY_IDX(packs, discharge_disable_gpios, 1),
+     .line_chg_dis = GPIO_DT_SPEC_GET_BY_IDX(packs, charge_disable_gpios, 1),
+     .line_dchg_stat = GPIO_DT_SPEC_GET_BY_IDX(packs, discharge_stat_oc_gpios, 1),
+     .line_chg_stat = GPIO_DT_SPEC_GET_BY_IDX(packs, charge_stat_oc_gpios, 1),
+     .line_alert = GPIO_DT_SPEC_GET_BY_IDX(packs, alert_gpios, 1),
      .pack_number = 2,
      .name = "Pack 2"
     }
 };
+
+static const struct gpio_dt_spec moarpwr = GPIO_DT_SPEC_GET(packs, moarpwr_gpios);
+
+#define GPIO_NODE DT_NODELABEL(gpiob)
+#define CAN_ID_PIN_0 3
+#define CAN_ID_PIN_1 4
+/* Not sure if these CAN ID signals are actually used, but they're on the schematic */
+static int get_can_id(void)
+{
+    const struct device const gpio_dev = DEVICE_DT_GET(GPIO_NODE);
+    int id = 0;
+    int val;
+
+    val = gpio_pin_configure(&gpio_dev, CAN_ID_PIN_0, GPIO_INPUT | GPIO_PULL_UP);
+    if (val < 0) {
+        return val;
+    }
+    val = gpio_pin_configure(&gpio_dev, CAN_ID_PIN_1, GPIO_INPUT | GPIO_PULL_UP);
+    if (val < 0) {
+        return val;
+    }
+
+    val = gpio_pin_get(&gpio_dev, CAN_ID_PIN_0);
+    if (val < 0) {
+        return val;
+    }
+    id = val;
+
+    val = gpio_pin_get(&gpio_dev, CAN_ID_PIN_1);
+    if (val < 0) {
+        return val;
+    }
+    id |= val << 1;
+
+    return id;
+}
 
 pack_t *get_pack(unsigned int pack)
 {
@@ -230,17 +269,56 @@ static void palToggleLine(int line)
     // TODO: replace with GPIO stuff
 }
 
+static int init_heaters(void)
+{
+    int ret;
+    int pack;
+
+    ret = gpio_pin_configure_dt(&moarpwr, GPIO_OUTPUT_INACTIVE);
+    if (ret) {
+        return ret;
+    }
+
+    for (pack = 0; pack < NPACKS; pack++) {
+        ret = gpio_pin_configure_dt(packs[pack].heater_on, GPIO_OUTPUT_INACTIVE);
+        if (ret) {
+            return ret;
+        }
+        ret = gpio_pin_configure_dt(packs[pack].line_chg_dis, GPIO_OUTPUT_INACTIVE);
+        if (ret) {
+            return ret;
+        }
+        ret = gpio_pin_configure_dt(packs[pack].line_dchg_dis, GPIO_OUTPUT_INACTIVE);
+        if (ret) {
+            return ret;
+        }
+        ret = gpio_pin_configure_dt(packs[pack].line_chg_stat, GPIO_INPUT);
+        if (ret) {
+            return ret;
+        }
+        ret = gpio_pin_configure_dt(packs[pack].line_dchg_stat, GPIO_INPUT);
+        if (ret) {
+            return ret;
+        }
+        ret = gpio_pin_configure_dt(packs[pack].line_alert, GPIO_INPUT);
+        if (ret) {
+            return ret;
+        }
+    }
+    return 0;
+}
+
 static void heaters_on(bool on)
 {
     if (on) {
-        palSetLine(LINE_MOARPWR);
-        palSetLine(LINE_HEATER_ON_1);
-        palSetLine(LINE_HEATER_ON_2);
+        gpio_pin_set_dt(&moarpwr, 1);
+        gpio_pin_set_dt(&packs[0].heater_on, 1);
+        gpio_pin_set_dt(&packs[1].heater_on, 1);
         LOG_DBG("Heaters ON\n\n");
     } else {
-        palClearLine(LINE_HEATER_ON_1);
-        palClearLine(LINE_HEATER_ON_2);
-        palClearLine(LINE_MOARPWR);
+        gpio_pin_set_dt(&packs[0].heater_on, 0);
+        gpio_pin_set_dt(&packs[1].heater_on, 0);
+        gpio_pin_set_dt(&moarpwr, 0);
         LOG_DBG("Heaters OFF\n\n");
     }
 }
@@ -613,20 +691,29 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
     (void)p2;
     (void)p3;
     unsigned int i;
+
 	packs[0].dev = DEVICE_DT_GET(DT_ALIAS(pack1));
 	packs[1].dev = DEVICE_DT_GET(DT_ALIAS(pack2));
+    static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+
+    console_init();
 
 	if (!device_is_ready(packs[0].dev)) {
 		printk("sensor: device pack1 not ready.\n");
 		return;
 	}
-
 	if (!device_is_ready(packs[1].dev)) {
 		printk("sensor: device pack2 not ready.\n");
 		return;
 	}
+    if (!device_is_ready(led.port)) {
+        return;
+    }
+    if (gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE)) {
+        return;
+    }
 
-    console_init();
+    heaters_init();
 
 #if VERBOSE_DEBUG
     print_batt_hist();
@@ -675,7 +762,7 @@ void batt_thread_handler(void *p1, void *p2, void *p3)
 
         if (ms >= next_led_update_ms) {
             next_hist_update_ms = ms + LED_TOGGLE_INTERVAL_MS;
-            palToggleLine(LINE_LED);
+            gpio_pin_toggle_dt(&led);
             loop++;
             if (loop % 2 == 0) {
                 continue; // we want light to blink at 2Hz, but code to run at 1Hz
@@ -721,5 +808,8 @@ void batt_close(void)
         // max17205Stop(packs[i].drv);
     }
 
+    static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+
+    gpio_pin_set_dt(&led, GPIO_OUTPUT_INACTIVE);
     palClearLine(LINE_LED);
 }

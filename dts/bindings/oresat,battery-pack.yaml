@@ -1,0 +1,34 @@
+# Oresat battery pack
+
+description: Oresat battery packs device
+
+compatible: "oresat,battery-packs"
+
+properties:
+  alert-gpios:
+    type: phandle-array
+    required: true
+    description: |
+      Alert input. Number of entries for this and the other gpios
+      should match number of packs.
+
+  charge-stat-oc-gpios:
+    type: phandle-array
+    description: |
+      Charge status input
+
+  discharge-stat-oc-gpios:
+    type: phandle-array
+    description: |
+      Disharge status input
+
+  charge-disable-gpios:
+    type: phandle-array
+    description: |
+      Charge disable output
+
+  discharge-disable-gpios:
+    type: phandle-array
+    description: |
+      Discharge disable output
+

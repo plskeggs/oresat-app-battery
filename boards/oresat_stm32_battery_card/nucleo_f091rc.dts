@@ -29,6 +29,7 @@
 		amber_led_1: led_1 {
 			gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
 			label = "Heartbeat LED";
+			status = "okay";
 		};
 	};
 
@@ -50,6 +51,18 @@
 		amber_pwm_led: amber_pwm_led {
 			pwms = <&pwm2 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
 		};
+	};
+
+   packs: oresat_battery_packs {
+   	compatible = "oresat,battery-packs";
+
+   	alert_gpios = <&gpiob 5 0>, <&gpiob 12 0>;
+   	charge_stat_oc_gpios = <&gpioa 7 0>, <&gpiob 10 0>;
+   	discharge_stat_oc_gpios = <&gpioa 1 0>, <&gpiob 11 0>;
+   	charge_disable_gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>, <&gpiob 0 GPIO_ACTIVE_HIGH>;
+   	discharge_disable_gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>, <&gpiob 1 GPIO_ACTIVE_HIGH>;
+   	heater_gpios = <&gpioc 14 GPIO_ACTIVE_HIGH>, <&gpioc 15 GPIO_ACTIVE_HIGH>;
+   	moarpwr_gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>;
 	};
 
 	aliases {
@@ -159,11 +172,11 @@
 };
 
 &adc1 {
-	pinctrl-0 = <&adc_in0_pa8>;
+	pinctrl-0 = <&adc_in0_pa6>; /* currently routed to pa8, which is not ADC-capable */
 	pinctrl-names = "default";
 	st,adc-clock-source = "SYNC";
 	st,adc-prescaler = <2>;
-	status = "okay";
+	status = "disabled"; /* disable for now */
 };
 
 &die_temp {
@@ -188,6 +201,7 @@
 		/* NOTE: disabled by default, PWM2 conflicts with SPI1 */
 		pinctrl-0 = <&tim2_ch1_pa0>;
 		pinctrl-names = "default";
+		status = "disabled";
 	};
 };
 

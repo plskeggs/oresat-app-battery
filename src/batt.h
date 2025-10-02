@@ -53,11 +53,12 @@ typedef struct pack {
     bool updated;
     const struct device *const dev;
     batt_pack_data_t data;
-    ioline_t heater_on;
-    ioline_t line_dchg_dis;
-    ioline_t line_chg_dis;
-    ioline_t line_dchg_stat;
-    ioline_t line_chg_stat;
+    const struct gpio_dt_spec heater_on;
+    const struct gpio_dt_spec line_dchg_dis;
+    const struct gpio_dt_spec line_chg_dis;
+    const struct gpio_dt_spec line_dchg_stat;
+    const struct gpio_dt_spec line_chg_stat;
+    const struct gpio_dt_spec line_alert;
     uint8_t pack_number;
     char *name;
 } pack_t;
